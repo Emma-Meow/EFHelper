@@ -1,0 +1,29 @@
+## Interface: 16001
+## Title: EFHelper
+## Notes: Helper addon for WoW Forever (Midnight API)
+## Author: Emma
+## Version: 1.0.0
+## OptionalDeps: RXPGuides
+## SavedVariables: EFHelperDB
+## SavedVariablesPerCharacter: EFHelperCharDB
+
+# Libraries
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
+Libs\AceAddon-3.0\AceAddon-3.0.xml
+Libs\AceDB-3.0\AceDB-3.0.xml
+Libs\AceEvent-3.0\AceEvent-3.0.xml
+Libs\AceTimer-3.0\AceTimer-3.0.xml
+
+# Core & Modules
+EFHelper_Core.lua
+EFHelper_Tagging.lua
+# EFHelper_Route.lua (Retired HUD module)
+EFHelper_Campfire.lua
+EFHelper_Swapper.lua
+EFHelper_XP.lua
+EFHelper_XPBar.lua
+EFHelper_TrainerData.lua
+EFHelper_TrainSpells.lua
+EFHelper_Config.lua
