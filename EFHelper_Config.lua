@@ -460,9 +460,27 @@ local function CreateCampfirePanel(parent)
     desc:SetJustifyH("LEFT")
     desc:SetText("Shows active campfire benefits in equivalent WoW buffs below the Minimap, and alerts when near a tent.")
 
+    -- 1. Enable Checkbox
+    local enableCb = CreateFrame("CheckButton", "EFHelperConfigCampfireEnable", p, "InterfaceOptionsCheckButtonTemplate")
+    enableCb:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
+    _G[enableCb:GetName() .. "Text"]:SetText("Enable Campfire HUD & Tent Alerts Module")
+    enableCb:SetScript("OnClick", function(self)
+        if Campfire then
+            local db = Campfire:GetDB()
+            db.enabled = self:GetChecked()
+            if db.enabled then
+                Campfire:Enable()
+            else
+                Campfire:Disable()
+            end
+            p:OnRefresh()
+        end
+    end)
+    p.enableCb = enableCb
+
     -- Status Box
     local statusBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    statusBox:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -12)
+    statusBox:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -10)
     statusBox:SetPoint("RIGHT", p, "RIGHT", -20, 0)
     statusBox:SetHeight(74)
     statusBox:SetBackdrop({
@@ -498,7 +516,7 @@ local function CreateCampfirePanel(parent)
             p:OnRefresh()
             if active then
                 print("|cff0cd29f[EFHelper]|r Campfire HUD test mode |cff00ff00enabled|r. Drag HUD to reposition.")
-            else
+            elseif active == false then
                 print("|cff0cd29f[EFHelper]|r Campfire HUD test mode |cffff4444disabled|r.")
             end
         end
@@ -574,11 +592,33 @@ local function CreateCampfirePanel(parent)
         "• |cffffffffNearby Campfire|r: Identifies proximity to any player-placed campfire or cosy tent.\n" ..
         "• |cffffffffBoosted Rest|r: Monitors tent rest buff cooldowns to optimize your resting cycles.\n" ..
         "• |cffffffffHUD Position|r: Sits below the Minimap by default. Enable Test Mode to drag anywhere.\n" ..
-        "• Slash commands: |cff00ffff/efcamp|r (status) or |cff00ffff/efcamp test|r (toggle draggable preview)."
+        "• Configuration: Use the controls above to toggle the module, test position, or print detected buffs."
     )
 
     p.OnRefresh = function(self)
         if not Campfire then return end
+
+        local db = Campfire:GetDB()
+        local isEnabled = (db.enabled ~= false)
+
+        if self.enableCb then
+            self.enableCb:SetChecked(isEnabled)
+        end
+
+        if not isEnabled then
+            self.statusText:SetText("|cffff4444Campfire & Tent Alerts Module is Disabled.|r\nCheck the box above to enable campfire HUD and proximity tent alerts.")
+            self.testStatus:SetText("|cff888888[Disabled]|r")
+            testBtn:Disable()
+            resetBtn:Disable()
+            printBtn:Disable()
+            dumpBtn:Disable()
+            return
+        end
+
+        testBtn:Enable()
+        resetBtn:Enable()
+        printBtn:Enable()
+        dumpBtn:Enable()
 
         local hasCampBenefits = Campfire.FindPlayerCampfireAura and (Campfire:FindPlayerCampfireAura() ~= nil)
         local hasNearby = Campfire.PlayerHasAura and Campfire:PlayerHasAura(Campfire.CAMPFIRE_NEARBY_SPELL_ID, Campfire.CAMPFIRE_NEARBY_NAME)
@@ -923,7 +963,7 @@ local function CreateXPPanel(parent)
         "• |cffffa500Dungeon Modifier (0.4x)|r: Automatically applies the dungeon farming anti-nerf multiplier inside 5-man instances.\n" ..
         "• Emits |cffffffffvital diagnostic feedback messages in chat|r on mob death for verification and testing.\n" ..
         "• Left-click and drag the text while visible to reposition it anywhere on your screen.\n" ..
-        "• Slash commands: |cff00ffff/efxp group|r (toggle), |cff00ffff/efxp model [standard|laplace]|r, |cff00ffff/efxp logs|r (stats), |cff00ffff/efxp clearlogs|r."
+        "• Slash commands: |cff00ffff/efxp logs|r (view recorded kill stats), |cff00ffff/efxp clearlogs|r (clear recorded logs)."
     )
 
     p.OnRefresh = function(self)
@@ -1120,7 +1160,7 @@ local function CreateXPBarPanel(parent)
         "• |cffffffffRolling Window|r: Prevents metric inertia by averaging over the last N hours instead of whole session.\n" ..
         "• |cffffffffAutopause|r: Neglects 6 of 10 idle minutes if AFK, preserving long-session rate integrity.\n" ..
         "• |cffffffffRight-Click bar|r: Toggle position Lock/Unlock. |cffffffffDrag|r to reposition when unlocked.\n" ..
-        "• Slash commands: |cff00ffff/efbar|r (config), |cff00ffff/efbar reset|r (reset session), |cff00ffff/efbar lock|r (lock/unlock)."
+        "• Slash commands: |cff00ffff/efh xpbar reset|r (reset session XP/hr), |cff00ffff/efh xpbar lock|r (lock/unlock position)."
     )
 
     p.OnRefresh = function(self)
@@ -1286,7 +1326,7 @@ local function CreateTrainSpellsPanel(parent)
         "• |cffffffffTrade Safe|r: Strictly ignores tradeskill trainers (never auto-buys profession recipes).\n" ..
         "• |cffffffffSpellbook View|r: View all 1-60 trainable spells, ranks, and gold costs for your class.\n" ..
         "• |cffffffffLevel-Up Toast|r: Unmovable banner notifying you of newly unlocked trainer abilities.\n" ..
-        "• Slash commands: |cff00ffff/efh train|r (options) or |cff00ffff/efh train now|r (immediate train)."
+        "• Configuration: Use the checkboxes above to toggle auto-training, spellbook tab, and toast alerts."
     )
 
     p.OnRefresh = function(self)

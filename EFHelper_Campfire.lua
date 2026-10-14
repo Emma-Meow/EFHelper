@@ -671,6 +671,12 @@ end
 
 -- Updates the HUD content based on active campfire state
 function Campfire:UpdateDisplay()
+    local db = Campfire:GetDB()
+    if not db or not db.enabled then
+        if Campfire.displayFrame then Campfire.displayFrame:Hide() end
+        return
+    end
+
     local frame = Campfire:GetOrCreateDisplayFrame()
     local hasAura = Campfire:FindPlayerCampfireAura() ~= nil
 
@@ -756,6 +762,12 @@ end
 function Campfire:UpdateTentAlert()
     if IsInCombat() then return end
 
+    local db = Campfire:GetDB()
+    if not db or not db.enabled then
+        if Campfire.tentAlertFrame then Campfire.tentAlertFrame:Hide() end
+        return
+    end
+
     local frame = Campfire:GetOrCreateTentAlertFrame()
 
     if Campfire.isTestMode then
@@ -799,6 +811,8 @@ end
 
 -- Main tooltip processing function
 local function ProcessCampfireTooltip(tooltip, data)
+    local db = Campfire:GetDB()
+    if not db or not db.enabled then return end
     if IsInCombat() or IsInsideInstance() then return end
 
     -- Guard 1: Fast-path check BEFORE extracting text to avoid processing every buff on screen
@@ -936,6 +950,8 @@ InitCampfireTooltipHooks()
 -- UNIT_AURA Refresh & State Tracking
 -- ----------------------------------------------------------------------------
 local function CheckCampfireAuraRefresh()
+    local db = Campfire:GetDB()
+    if not db or not db.enabled then return end
     if IsInCombat() or IsInsideInstance() then
         return
     end
@@ -1014,12 +1030,15 @@ end
 -- ----------------------------------------------------------------------------
 local auraWatcher = CreateFrame("Frame")
 auraWatcher:SetScript("OnEvent", function(self, event, unit)
+    local db = Campfire:GetDB()
+    if not db or not db.enabled then return end
     if IsInCombat() or IsInsideInstance() then return end
     CheckCampfireAuraRefresh()
 end)
 
 local function UpdateAuraWatcherState()
-    if IsInsideInstance() then
+    local db = Campfire:GetDB()
+    if not db or not db.enabled or IsInsideInstance() then
         auraWatcher:UnregisterAllEvents()
         if Campfire.displayFrame then Campfire.displayFrame:Hide() end
         if Campfire.tentAlertFrame then Campfire.tentAlertFrame:Hide() end
@@ -1031,27 +1050,67 @@ end
 Campfire.UpdateAuraWatcherState = UpdateAuraWatcherState
 
 function Campfire:OnInitialize()
-    self:RegisterEvent("PLAYER_LOGIN")
+    local db = self:GetDB()
+    if not db.enabled then
+        self:SetEnabledState(false)
+    end
+end
+
+function Campfire:OnEnable()
+    local db = self:GetDB()
+    db.enabled = true
+
+    inCombat = (InCombatLockdown and InCombatLockdown()) or (UnitAffectingCombat and UnitAffectingCombat("player")) or false
+    InitCampfireTooltipHooks()
+
+    local frame = Campfire:GetOrCreateDisplayFrame()
+    Campfire:RestoreDisplayPosition(frame)
+    Campfire:GetOrCreateTentAlertFrame()
+
     self:RegisterEvent("PLAYER_ENTERING_WORLD")
     self:RegisterEvent("PLAYER_REGEN_DISABLED")
     self:RegisterEvent("PLAYER_REGEN_ENABLED")
     self:RegisterEvent("ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD")
 
-    if IsLoggedIn and IsLoggedIn() then
-        self:PLAYER_LOGIN()
-    end
-end
-
-function Campfire:PLAYER_LOGIN()
-    inCombat = (InCombatLockdown and InCombatLockdown()) or (UnitAffectingCombat and UnitAffectingCombat("player")) or false
-    InitCampfireTooltipHooks()
-    local frame = Campfire:GetOrCreateDisplayFrame()
-    Campfire:RestoreDisplayPosition(frame)
-    Campfire:GetOrCreateTentAlertFrame()
     UpdateAuraWatcherState()
 end
 
+function Campfire:OnDisable()
+    local db = self:GetDB()
+    db.enabled = false
+
+    if pendingGraceTimer and pendingGraceTimer.Cancel then
+        pendingGraceTimer:Cancel()
+        pendingGraceTimer = nil
+    end
+
+    if auraWatcher then
+        auraWatcher:UnregisterAllEvents()
+    end
+
+    self:UnregisterAllEvents()
+
+    if Campfire.isTestMode then
+        Campfire.isTestMode = false
+    end
+
+    if Campfire.displayFrame then
+        Campfire.displayFrame:Hide()
+    end
+    if Campfire.tentAlertFrame then
+        Campfire.tentAlertFrame:Hide()
+    end
+
+    lastCampfireInstanceID = nil
+    lastCampfireExpiration = nil
+    Campfire.activeBuffs = {}
+    EFHelper.currentCampfireBuffs = {}
+    hasPrintedBuffsThisHover = false
+end
+
 function Campfire:PLAYER_ENTERING_WORLD()
+    local db = self:GetDB()
+    if not db.enabled then return end
     inCombat = (InCombatLockdown and InCombatLockdown()) or (UnitAffectingCombat and UnitAffectingCombat("player")) or false
     UpdateAuraWatcherState()
 end
@@ -1063,7 +1122,8 @@ end
 function Campfire:PLAYER_REGEN_ENABLED()
     inCombat = false
     hasPrintedBuffsThisHover = false
-    if not IsInsideInstance() then
+    local db = self:GetDB()
+    if db.enabled and not IsInsideInstance() then
         CheckCampfireAuraRefresh()
     end
 end
@@ -1072,6 +1132,11 @@ end
 -- Public Campfire Control Methods (Used by /efcamp and EFHelper_Config)
 -- ----------------------------------------------------------------------------
 function Campfire:ToggleTestMode()
+    local db = Campfire:GetDB()
+    if not db.enabled then
+        print("|cff0cd29f[EFHelper]|r Campfire & Rest module is currently disabled. Enable it first to test.")
+        return false
+    end
     Campfire.isTestMode = not Campfire.isTestMode
     if Campfire.isTestMode then
         Campfire.activeBuffs = {
@@ -1106,41 +1171,5 @@ function Campfire:DumpDebug()
     for _, b in ipairs(found) do
         local alias = Campfire:GetBuffAlias(b.name)
         print("  * " .. b.name .. " (" .. alias .. ") => " .. (b.stat or ""))
-    end
-end
-
--- ----------------------------------------------------------------------------
--- Slash Command: /efcamp or /efhcamp
--- ----------------------------------------------------------------------------
-SLASH_EFHELPERCAMP1 = "/efcamp"
-SLASH_EFHELPERCAMP2 = "/efhcamp"
-
-SlashCmdList["EFHELPERCAMP"] = function(msg)
-    local cmd = msg and msg:lower():match("^%s*(.-)%s*$")
-
-    if cmd == "dump" or cmd == "debug" then
-        Campfire:DumpDebug()
-    elseif cmd == "test" then
-        local active = Campfire:ToggleTestMode()
-        print(string.format("|cff0cd29f[EFHelper]|r Campfire HUD test mode %s. Drag HUD to reposition.", active and "|cff00ff00enabled|r" or "|cffff4444disabled|r"))
-    elseif cmd == "reset" then
-        Campfire:ResetPosition()
-        print("|cff0cd29f[EFHelper]|r Campfire HUD position reset to below Minimap.")
-    elseif cmd == "config" or cmd == "options" then
-        if EFHelper.ToggleConfig then
-            EFHelper:ToggleConfig(2)
-        end
-    else
-        if Campfire.activeBuffs and #Campfire.activeBuffs > 0 then
-            Campfire:PrintBuffs()
-        else
-            local aura = Campfire:FindPlayerCampfireAura()
-            print(string.format("|cff0cd29f[EFHelper]|r Camp Benefits: %s", aura and "|cff00ff00Active (Resting)|r" or "|cffff4444Inactive|r"))
-        end
-        local hasNearby = Campfire:PlayerHasAura(Campfire.CAMPFIRE_NEARBY_SPELL_ID, Campfire.CAMPFIRE_NEARBY_NAME)
-        local hasBoosted = Campfire:PlayerHasAura(Campfire.BOOSTED_REST_SPELL_ID, Campfire.BOOSTED_REST_NAME)
-        if hasNearby then
-            print(string.format("|cff0cd29f[EFHelper]|r |cffffd100Campfire Nearby:|r Detected |cffffffff(Boosted Rest: %s)|r", hasBoosted and "|cffff4444Active|r" or "|cff00ff00Missing - Alert Shown|r"))
-        end
     end
 end

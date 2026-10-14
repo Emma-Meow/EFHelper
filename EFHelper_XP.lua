@@ -1192,48 +1192,10 @@ SLASH_EFXP1 = "/efxp"
 
 SlashCmdList["EFXP"] = function(msg)
     local rawMsg = msg and msg:match("^%s*(.-)%s*$") or ""
-    local cmd, arg = rawMsg:match("^(%S+)%s*(.*)$")
+    local cmd = rawMsg:match("^(%S+)")
     cmd = cmd and cmd:lower() or ""
-    arg = arg and arg:lower() or ""
-    local db = XP:GetDB()
 
-    if cmd == "test" then
-        XP.isTestMode = not XP.isTestMode
-        XP:UpdateHUD()
-        print("|cff0cd29f[EFHelper XP]|r Preview test mode: " .. (XP.isTestMode and "|cff00ff00ON|r" or "|cffff4444OFF|r"))
-    elseif cmd == "reset" then
-        db.posX = 0
-        db.posY = 130
-        if xpHudFrame then
-            xpHudFrame:ClearAllPoints()
-            xpHudFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 130)
-        end
-        print("|cff0cd29f[EFHelper XP]|r Position reset to center.")
-    elseif cmd == "toggle" then
-        db.enabled = not db.enabled
-        XP:UpdateActiveState()
-        XP:UpdateHUD()
-        print("|cff0cd29f[EFHelper XP]|r Kill XP Predictor: " .. (db.enabled and "|cff00ff00Enabled|r" or "|cffff4444Disabled|r"))
-    elseif cmd == "group" or cmd == "party" or cmd == "duo" then
-        db.groupPredictor = not db.groupPredictor
-        db.experimentalDuo = db.groupPredictor
-        XP:UpdateActiveState()
-        XP:UpdateHUD()
-        print("|cff00ccff[EFHelper XP]|r Party Group XP Predictor (2-5 Players): " ..
-            (db.groupPredictor and "|cff00ff00Enabled|r" or "|cffff4444Disabled|r"))
-    elseif cmd == "model" then
-        if arg == "laplace" then
-            db.formulaModel = "laplace"
-            print("|cff00ccff[EFHelper XP]|r Formula Weighting Model set to: |cffffd100Laplace (L+1)/(ΣL+n)|r")
-        elseif arg == "standard" then
-            db.formulaModel = "standard"
-            print("|cff00ccff[EFHelper XP]|r Formula Weighting Model set to: |cffffd100Standard (L+2)/(ΣL+2n)|r")
-        else
-            local curr = db.formulaModel or "standard"
-            print("|cff00ccff[EFHelper XP]|r Current Model: |cffffd100" .. curr .. "|r. Use |cffffffff/efxp model standard|r or |cffffffff/efxp model laplace|r to switch.")
-        end
-        XP:UpdateHUD()
-    elseif cmd == "logs" or cmd == "testlog" or cmd == "testlogs" then
+    if cmd == "logs" or cmd == "testlog" or cmd == "testlogs" then
         local logs = XP:GetLogs()
         local total = #logs
         print(string.format("|cff00ccff[EFHelper XP]|r Recorded Test Kills: |cffffffff%d|r entries.", total))

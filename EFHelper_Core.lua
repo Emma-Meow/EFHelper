@@ -275,51 +275,32 @@ function EFHelper:ToggleConfig(tabIndex)
 end
 
 -- ----------------------------------------------------------------------------
--- Master Slash Command (/efh)
+-- Master Slash Command (/efh, /efhelper)
 -- ----------------------------------------------------------------------------
 SLASH_EFHELPER1 = "/efh"
 SLASH_EFHELPER2 = "/efhelper"
 
 SlashCmdList["EFHELPER"] = function(msg)
-    local cmd = msg and msg:lower():match("^%s*(.-)%s*$")
-    if cmd == "train now" or cmd == "autotrain" or cmd == "train spells" then
-        if EFHelper.TrainSpells and EFHelper.TrainSpells.TrainSelectedSpells then
-            EFHelper.TrainSpells:TrainSelectedSpells(true)
-        end
-    elseif cmd == "camp" or cmd == "campfire" then
-        EFHelper:ToggleConfig(2)
-    elseif cmd == "swap" or cmd == "swapper" then
-        EFHelper:ToggleConfig(3)
-    elseif cmd == "xp" then
-        EFHelper:ToggleConfig(4)
-    elseif cmd == "bar" or cmd == "xpbar" then
-        EFHelper:ToggleConfig(5)
-    elseif cmd == "train" or cmd == "trainer" or cmd == "toast" then
-        EFHelper:ToggleConfig(6)
-    else
-        EFHelper:ToggleConfig(1)
-    end
-end
+    local raw = msg and msg:lower():match("^%s*(.-)%s*$") or ""
+    local mod, action = raw:match("^(%S+)%s*(.*)$")
+    mod = mod or ""
+    action = action or ""
 
--- ----------------------------------------------------------------------------
--- Dedicated XPBar Slash Commands (/efbar, /efxpbar)
--- ----------------------------------------------------------------------------
-SLASH_EFXPBAR1 = "/efbar"
-SLASH_EFXPBAR2 = "/efxpbar"
-
-SlashCmdList["EFXPBAR"] = function(msg)
-    local cmd = msg and msg:lower():match("^%s*(.-)%s*$")
-    if cmd == "reset" then
-        if EFHelper.XPBar and EFHelper.XPBar.ResetSession then
-            EFHelper.XPBar:ResetSession()
+    if mod == "xpbar" or mod == "bar" then
+        if action == "reset" then
+            if EFHelper.XPBar and EFHelper.XPBar.ResetSession then
+                EFHelper.XPBar:ResetSession()
+            end
+            return
+        elseif action == "lock" then
+            if EFHelper.XPBar and EFHelper.XPBar.GetDB then
+                local db = EFHelper.XPBar:GetDB()
+                db.locked = not db.locked
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[EFHelper XPBar]|r Frame is now %s.", db.locked and "|cffff5555Locked|r" or "|cff55ff55Unlocked|r"))
+            end
+            return
         end
-    elseif cmd == "lock" then
-        if EFHelper.XPBar and EFHelper.XPBar.GetDB then
-            local db = EFHelper.XPBar:GetDB()
-            db.locked = not db.locked
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[EFHelper XPBar]|r Frame is now %s.", db.locked and "|cffff5555Locked|r" or "|cff55ff55Unlocked|r"))
-        end
-    else
-        EFHelper:ToggleConfig(5)
     end
+
+    EFHelper:ToggleConfig()
 end
