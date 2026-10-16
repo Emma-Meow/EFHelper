@@ -30,7 +30,6 @@ function XP:GetDB()
             showRested = true,
             showZeroXp = true,
             showMobInfo = false,
-            showEfficiency = true,
             fontSize = 18,
             posX = 0,
             posY = 130,
@@ -44,9 +43,6 @@ function XP:GetDB()
 
     if db.showMobInfo == nil then
         db.showMobInfo = false
-    end
-    if db.showEfficiency == nil then
-        db.showEfficiency = true
     end
 
     if db.groupPredictor == nil then
@@ -458,7 +454,7 @@ function XP:GetOrCreateHUD()
 
     local db = XP:GetDB()
     local f = _G["EFHelperXPHUD"] or CreateFrame("Frame", "EFHelperXPHUD", UIParent)
-    f:SetSize(460, 48)
+    f:SetSize(460, 36)
     f:SetPoint("CENTER", UIParent, "CENTER", db.posX or 0, db.posY or 130)
     f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
@@ -481,22 +477,13 @@ function XP:GetOrCreateHUD()
     text:ClearAllPoints()
     text:SetPoint("CENTER", f, "CENTER", 0, 0)
 
-    local subText = f.subText or f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    subText:SetJustifyH("CENTER")
-    subText:ClearAllPoints()
-    subText:SetPoint("TOP", text, "BOTTOM", 0, -2)
-
     local fontSize = db.fontSize or 18
-    local subFontSize = math.max(10, fontSize - 5)
     if UI and UI.SetupFontString then
         UI.SetupFontString(text, fontSize, "OUTLINE", "Expressway")
-        UI.SetupFontString(subText, subFontSize, "OUTLINE", "Expressway")
     elseif EFHelper and EFHelper.SetupFontString then
         EFHelper:SetupFontString(text, fontSize, "OUTLINE", "Expressway")
-        EFHelper:SetupFontString(subText, subFontSize, "OUTLINE", "Expressway")
     end
     f.text = text
-    f.subText = subText
     f:Hide()
 
     xpHudFrame = f
@@ -508,17 +495,10 @@ function XP:ApplyFontSettings()
     if not xpHudFrame or not xpHudFrame.text then return end
     local db = XP:GetDB()
     local fontSize = db.fontSize or 18
-    local subFontSize = math.max(10, fontSize - 5)
     if UI and UI.SetupFontString then
         UI.SetupFontString(xpHudFrame.text, fontSize, "OUTLINE", "Expressway")
-        if xpHudFrame.subText then
-            UI.SetupFontString(xpHudFrame.subText, subFontSize, "OUTLINE", "Expressway")
-        end
     elseif EFHelper and EFHelper.SetupFontString then
         EFHelper:SetupFontString(xpHudFrame.text, fontSize, "OUTLINE", "Expressway")
-        if xpHudFrame.subText then
-            EFHelper:SetupFontString(xpHudFrame.subText, subFontSize, "OUTLINE", "Expressway")
-        end
     end
 end
 
@@ -871,22 +851,11 @@ function XP:UpdateHUD()
         if previewPct == "" then previewPct = " |cffcccccc(1.8%)|r" end
         local dngTag = (isDungeon and db.showMobInfo) and " |cffffa500[Dungeon 0.4x]|r" or ""
         if XP:IsGroupActive() or db.groupPredictor then
-            local partyTag = db.showMobInfo and " |cff00ccff[Party Preview]|r" or ""
+            local partyTag = db.showMobInfo and " |cff00ccff[Party Preview]|r" or " |cff888888[Preview Mode]|r"
             hud.text:SetText("|cffffd100+135 XP|r" .. previewPct .. dngTag .. partyTag)
         else
             local restedPreview = db.showRested and " |cff00ffff(+165 Rested)|r" or ""
-            hud.text:SetText("|cffffd100+165 XP|r" .. previewPct .. dngTag .. restedPreview)
-        end
-        if db.showEfficiency then
-            hud.text:ClearAllPoints()
-            hud.text:SetPoint("CENTER", hud, "CENTER", 0, 7)
-            hud.subText:SetText("|cff00ccffXP/HP: 0.225|r |cff888888[Preview Mode]|r")
-            hud.subText:Show()
-        else
-            hud.text:ClearAllPoints()
-            hud.text:SetPoint("CENTER", hud, "CENTER", 0, 0)
-            hud.subText:SetText("")
-            hud.subText:Hide()
+            hud.text:SetText("|cffffd100+165 XP|r" .. restedPreview .. previewPct .. dngTag .. " |cff888888[Preview Mode]|r")
         end
         hud:Show()
         return
@@ -899,10 +868,6 @@ function XP:UpdateHUD()
     -- Guard against secret numbers or restricted values in instance environments
     if Utils and Utils.IsSecret then
         if Utils.IsSecret(mobLevel) or Utils.IsSecret(charLevel) then
-            hud.text:ClearAllPoints()
-            hud.text:SetPoint("CENTER", hud, "CENTER", 0, 0)
-            hud.subText:SetText("")
-            hud.subText:Hide()
             hud.text:SetText("|cffffd100+?? XP|r |cffffa500[Dungeon 0.4x]|r")
             hud:Show()
             XP:WatchTargetDeath(true)
@@ -928,10 +893,6 @@ function XP:UpdateHUD()
         if not roster then
             xp, isGray, diff, isBoss = XP:CalculatePredictedXP(charLevel, mobLevel, classification)
         elseif roster.isSyncing then
-            hud.text:ClearAllPoints()
-            hud.text:SetPoint("CENTER", hud, "CENTER", 0, 0)
-            hud.subText:SetText("")
-            hud.subText:Hide()
             hud.text:SetText("|cffffd100+?? XP|r |cff888888(Syncing party...)|r")
             hud:Show()
             XP:WatchTargetDeath(true)
@@ -977,10 +938,6 @@ function XP:UpdateHUD()
     end
 
     if isBoss then
-        hud.text:ClearAllPoints()
-        hud.text:SetPoint("CENTER", hud, "CENTER", 0, 0)
-        hud.subText:SetText("")
-        hud.subText:Hide()
         hud.text:SetText("|cffff2020?? XP (Boss)|r")
         hud:Show()
         XP:WatchTargetDeath(false)
@@ -988,10 +945,6 @@ function XP:UpdateHUD()
     end
 
     if isGray then
-        hud.text:ClearAllPoints()
-        hud.text:SetPoint("CENTER", hud, "CENTER", 0, 0)
-        hud.subText:SetText("")
-        hud.subText:Hide()
         if db.showZeroXp then
             local grayMsg = isGroupActive and "|cff8888880 XP (Trivial to Player)|r" or "|cff8888880 XP (Trivial / Gray)|r"
             hud.text:SetText(grayMsg)
@@ -1039,29 +992,6 @@ function XP:UpdateHUD()
     end
 
     hud.text:SetText(xpString)
-
-    -- Optional second line: XP / Max HP Efficiency Comparison
-    local maxHp = UnitHealthMax("target")
-    local showSub = false
-    if db.showEfficiency and xp and xp > 0 and maxHp then
-        if not (Utils and Utils.IsSecret and Utils.IsSecret(maxHp)) and maxHp > 0 then
-            local ratio = xp / maxHp
-            hud.subText:SetText(string.format("|cff00ccffXP/HP: %.3f|r", ratio))
-            showSub = true
-        end
-    end
-
-    if showSub then
-        hud.text:ClearAllPoints()
-        hud.text:SetPoint("CENTER", hud, "CENTER", 0, 7)
-        hud.subText:Show()
-    else
-        hud.text:ClearAllPoints()
-        hud.text:SetPoint("CENTER", hud, "CENTER", 0, 0)
-        hud.subText:SetText("")
-        hud.subText:Hide()
-    end
-
     hud:Show()
 
     -- Activate targetWatcher for death detection (engine-filtered to "target" only)
@@ -1206,7 +1136,6 @@ function XP:UpdateActiveState()
             end
             self:UnregisterEvent("PLAYER_TARGET_CHANGED")
             self:UnregisterEvent("UNIT_CLASSIFICATION_CHANGED")
-            self:UnregisterEvent("UNIT_MAXHEALTH")
             self:UnregisterEvent("PLAYER_XP_UPDATE")
             self:UnregisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
         end
@@ -1215,7 +1144,6 @@ function XP:UpdateActiveState()
             isSleeping = false
             self:RegisterEvent("PLAYER_TARGET_CHANGED")
             self:RegisterEvent("UNIT_CLASSIFICATION_CHANGED")
-            self:RegisterEvent("UNIT_MAXHEALTH")
             self:RegisterEvent("PLAYER_XP_UPDATE")
             self:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
             XP:UpdateHUD()
@@ -1235,7 +1163,6 @@ function XP:OnInitialize()
     -- Register solo & group events
     self:RegisterEvent("PLAYER_TARGET_CHANGED")
     self:RegisterEvent("UNIT_CLASSIFICATION_CHANGED")
-    self:RegisterEvent("UNIT_MAXHEALTH")
     self:RegisterEvent("PLAYER_XP_UPDATE")
     self:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
 
@@ -1264,12 +1191,6 @@ function XP:PLAYER_TARGET_CHANGED()
 end
 
 function XP:UNIT_CLASSIFICATION_CHANGED(event, unit)
-    if unit == "target" then
-        pcall(XP.UpdateHUD, XP)
-    end
-end
-
-function XP:UNIT_MAXHEALTH(event, unit)
     if unit == "target" then
         pcall(XP.UpdateHUD, XP)
     end

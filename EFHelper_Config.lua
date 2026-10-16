@@ -825,21 +825,9 @@ local function CreateXPPanel(parent)
         end
     end)
 
-    -- 4. XP / Max HP Efficiency Ratio Checkbox
-    local efficiencyCb = CreateFrame("CheckButton", "EFHelperConfigXPEfficiency", p, "InterfaceOptionsCheckButtonTemplate")
-    efficiencyCb:SetPoint("TOPLEFT", restedCb, "BOTTOMLEFT", 0, -4)
-    _G[efficiencyCb:GetName() .. "Text"]:SetText("Show XP / Max HP Efficiency Ratio (e.g. XP/HP: 0.125)")
-    efficiencyCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.showEfficiency = self:GetChecked()
-            XP:UpdateHUD()
-        end
-    end)
-
-    -- 5. Show Mob & Group Info Tags Checkbox
+    -- 4. Show Mob & Group Info Tags Checkbox
     local mobInfoCb = CreateFrame("CheckButton", "EFHelperConfigXPMobInfo", p, "InterfaceOptionsCheckButtonTemplate")
-    mobInfoCb:SetPoint("TOPLEFT", efficiencyCb, "BOTTOMLEFT", 0, -4)
+    mobInfoCb:SetPoint("TOPLEFT", restedCb, "BOTTOMLEFT", 0, -4)
     _G[mobInfoCb:GetName() .. "Text"]:SetText("Show Mob & Group Tags (e.g. [Party 2], [Dungeon 0.4x], [Elite])")
     mobInfoCb:SetScript("OnClick", function(self)
         if XP then
@@ -849,7 +837,7 @@ local function CreateXPPanel(parent)
         end
     end)
 
-    -- 6. Show 0 XP Gray Warning Checkbox
+    -- 5. Show 0 XP Gray Warning Checkbox
     local zeroXpCb = CreateFrame("CheckButton", "EFHelperConfigXPZero", p, "InterfaceOptionsCheckButtonTemplate")
     zeroXpCb:SetPoint("TOPLEFT", mobInfoCb, "BOTTOMLEFT", 0, -4)
     _G[zeroXpCb:GetName() .. "Text"]:SetText("Show '0 XP (Trivial / Gray)' warning on trivial mobs")
@@ -983,7 +971,6 @@ local function CreateXPPanel(parent)
     infoText:SetText(
         "|cffffd100Kill XP Predictor Notes:|r\n" ..
         "• Displays |cffffffffonly for hostile/attackable NPC targets|r in open world and 5-man dungeons.\n" ..
-        "• |cff00ccffXP/HP Efficiency|r: Calculates predicted XP divided by enemy max health for grinding efficiency comparison.\n" ..
         "• |cffffd100Party Predictor (2–5 Players)|r: Calculates individual player base pools, share weighting, and group bonus.\n" ..
         "• |cffffa500Dungeon Modifier (0.4x)|r: Automatically applies the dungeon farming anti-nerf multiplier inside 5-man instances.\n" ..
         "• Emits |cffffffffvital diagnostic feedback messages in chat|r on mob death for verification and testing.\n" ..
@@ -997,7 +984,6 @@ local function CreateXPPanel(parent)
             enableCb:SetChecked(db.enabled ~= false)
             pctCb:SetChecked(db.showPercentage ~= false)
             restedCb:SetChecked(db.showRested ~= false)
-            efficiencyCb:SetChecked(db.showEfficiency ~= false)
             mobInfoCb:SetChecked(db.showMobInfo == true)
             zeroXpCb:SetChecked(db.showZeroXp ~= false)
             feedbackCb:SetChecked(db.showFeedback ~= false)
