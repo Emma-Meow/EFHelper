@@ -803,7 +803,7 @@ local function CreateXPPanel(parent)
 
     -- 2. Show XP Percentage Checkbox
     local pctCb = CreateFrame("CheckButton", "EFHelperConfigXPPct", p, "InterfaceOptionsCheckButtonTemplate")
-    pctCb:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -4)
+    pctCb:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -2)
     _G[pctCb:GetName() .. "Text"]:SetText("Show XP Percentage relative to level (e.g. 1.5%)")
     pctCb:SetScript("OnClick", function(self)
         if XP then
@@ -815,7 +815,7 @@ local function CreateXPPanel(parent)
 
     -- 3. Rested XP Potential Checkbox
     local restedCb = CreateFrame("CheckButton", "EFHelperConfigXPRested", p, "InterfaceOptionsCheckButtonTemplate")
-    restedCb:SetPoint("TOPLEFT", pctCb, "BOTTOMLEFT", 0, -4)
+    restedCb:SetPoint("TOPLEFT", pctCb, "BOTTOMLEFT", 0, -2)
     _G[restedCb:GetName() .. "Text"]:SetText("Show Rested XP Bonus in Display (+X Rested)")
     restedCb:SetScript("OnClick", function(self)
         if XP then
@@ -827,7 +827,7 @@ local function CreateXPPanel(parent)
 
     -- 4. Show Mob & Group Info Tags Checkbox
     local mobInfoCb = CreateFrame("CheckButton", "EFHelperConfigXPMobInfo", p, "InterfaceOptionsCheckButtonTemplate")
-    mobInfoCb:SetPoint("TOPLEFT", restedCb, "BOTTOMLEFT", 0, -4)
+    mobInfoCb:SetPoint("TOPLEFT", restedCb, "BOTTOMLEFT", 0, -2)
     _G[mobInfoCb:GetName() .. "Text"]:SetText("Show Mob & Group Tags (e.g. [Party 2], [Dungeon 0.4x], [Elite])")
     mobInfoCb:SetScript("OnClick", function(self)
         if XP then
@@ -837,9 +837,21 @@ local function CreateXPPanel(parent)
         end
     end)
 
-    -- 5. Show 0 XP Gray Warning Checkbox
+    -- 5. Show XP Efficiency & Expected HP Checkbox
+    local effCb = CreateFrame("CheckButton", "EFHelperConfigXPEff", p, "InterfaceOptionsCheckButtonTemplate")
+    effCb:SetPoint("TOPLEFT", mobInfoCb, "BOTTOMLEFT", 0, -2)
+    _G[effCb:GetName() .. "Text"]:SetText("Show XP Efficiency & Expected Mob HP (2nd line: Eff & Actual / Expected HP)")
+    effCb:SetScript("OnClick", function(self)
+        if XP then
+            local db = XP:GetDB()
+            db.showEfficiency = self:GetChecked()
+            XP:UpdateHUD()
+        end
+    end)
+
+    -- 6. Show 0 XP Gray Warning Checkbox
     local zeroXpCb = CreateFrame("CheckButton", "EFHelperConfigXPZero", p, "InterfaceOptionsCheckButtonTemplate")
-    zeroXpCb:SetPoint("TOPLEFT", mobInfoCb, "BOTTOMLEFT", 0, -4)
+    zeroXpCb:SetPoint("TOPLEFT", effCb, "BOTTOMLEFT", 0, -2)
     _G[zeroXpCb:GetName() .. "Text"]:SetText("Show '0 XP (Trivial / Gray)' warning on trivial mobs")
     zeroXpCb:SetScript("OnClick", function(self)
         if XP then
@@ -849,9 +861,9 @@ local function CreateXPPanel(parent)
         end
     end)
 
-    -- 5. Print Kill Feedback in Chat Checkbox
+    -- 7. Print Kill Feedback in Chat Checkbox
     local feedbackCb = CreateFrame("CheckButton", "EFHelperConfigXPFeedback", p, "InterfaceOptionsCheckButtonTemplate")
-    feedbackCb:SetPoint("TOPLEFT", zeroXpCb, "BOTTOMLEFT", 0, -4)
+    feedbackCb:SetPoint("TOPLEFT", zeroXpCb, "BOTTOMLEFT", 0, -2)
     _G[feedbackCb:GetName() .. "Text"]:SetText("Print Kill Feedback in Chat (Diagnostic verification upon mob death)")
     feedbackCb:SetScript("OnClick", function(self)
         if XP then
@@ -860,9 +872,9 @@ local function CreateXPPanel(parent)
         end
     end)
 
-    -- 6. Party Group XP Predictor Checkbox (2-5 Players)
+    -- 8. Party Group XP Predictor Checkbox (2-5 Players)
     local groupCb = CreateFrame("CheckButton", "EFHelperConfigXPGroup", p, "InterfaceOptionsCheckButtonTemplate")
-    groupCb:SetPoint("TOPLEFT", feedbackCb, "BOTTOMLEFT", 0, -4)
+    groupCb:SetPoint("TOPLEFT", feedbackCb, "BOTTOMLEFT", 0, -2)
     _G[groupCb:GetName() .. "Text"]:SetText("|cffffd100[Party]|r Enable Party Group XP Predictor (2–5 Players)")
     groupCb:SetScript("OnClick", function(self)
         if XP then
@@ -874,10 +886,10 @@ local function CreateXPPanel(parent)
         end
     end)
 
-    -- 7. Weighting Model Selector
+    -- 9. Weighting Model Selector
     local modelBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     modelBtn:SetSize(230, 24)
-    modelBtn:SetPoint("TOPLEFT", groupCb, "BOTTOMLEFT", 4, -8)
+    modelBtn:SetPoint("TOPLEFT", groupCb, "BOTTOMLEFT", 4, -6)
     modelBtn:SetText("Model: Standard (L+2)/(ΣL+2n)")
     p.modelBtn = modelBtn
 
@@ -899,10 +911,10 @@ local function CreateXPPanel(parent)
         end
     end)
 
-    -- 8. Test Logs Controls
+    -- 10. Test Logs Controls
     local clearLogsBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     clearLogsBtn:SetSize(140, 24)
-    clearLogsBtn:SetPoint("TOPLEFT", modelBtn, "BOTTOMLEFT", 0, -8)
+    clearLogsBtn:SetPoint("TOPLEFT", modelBtn, "BOTTOMLEFT", 0, -6)
     clearLogsBtn:SetText("Clear Test Logs")
 
     local logsCountText = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -919,10 +931,10 @@ local function CreateXPPanel(parent)
         print("|cff00ccff[EFHelper XP]|r Saved test logs cleared.")
     end)
 
-    -- 9. Action Buttons (Preview Test Mode & Reset Position)
+    -- 11. Action Buttons (Preview Test Mode & Reset Position)
     local testBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
     testBtn:SetSize(140, 24)
-    testBtn:SetPoint("TOPLEFT", clearLogsBtn, "BOTTOMLEFT", 0, -10)
+    testBtn:SetPoint("TOPLEFT", clearLogsBtn, "BOTTOMLEFT", 0, -8)
     testBtn:SetText("Preview Display")
     p.testBtn = testBtn
     testBtn:SetScript("OnClick", function()
@@ -952,7 +964,7 @@ local function CreateXPPanel(parent)
 
     -- Information Box
     local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", testBtn, "BOTTOMLEFT", 0, -12)
+    infoBox:SetPoint("TOPLEFT", testBtn, "BOTTOMLEFT", 0, -10)
     infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
     infoBox:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -971,9 +983,9 @@ local function CreateXPPanel(parent)
     infoText:SetText(
         "|cffffd100Kill XP Predictor Notes:|r\n" ..
         "• Displays |cffffffffonly for hostile/attackable NPC targets|r in open world and 5-man dungeons.\n" ..
+        "• |cffccccccEfficiency & Expected HP|r: Computes |cffffffff(XP / ExpectedHP) * 100|r and compares actual vs. expected HP.\n" ..
         "• |cffffd100Party Predictor (2–5 Players)|r: Calculates individual player base pools, share weighting, and group bonus.\n" ..
         "• |cffffa500Dungeon Modifier (0.4x)|r: Automatically applies the dungeon farming anti-nerf multiplier inside 5-man instances.\n" ..
-        "• Emits |cffffffffvital diagnostic feedback messages in chat|r on mob death for verification and testing.\n" ..
         "• Left-click and drag the text while visible to reposition it anywhere on your screen.\n" ..
         "• Slash commands: |cff00ffff/efxp logs|r (view recorded kill stats), |cff00ffff/efxp clearlogs|r (clear recorded logs)."
     )
@@ -985,6 +997,7 @@ local function CreateXPPanel(parent)
             pctCb:SetChecked(db.showPercentage ~= false)
             restedCb:SetChecked(db.showRested ~= false)
             mobInfoCb:SetChecked(db.showMobInfo == true)
+            effCb:SetChecked(db.showEfficiency ~= false)
             zeroXpCb:SetChecked(db.showZeroXp ~= false)
             feedbackCb:SetChecked(db.showFeedback ~= false)
             groupCb:SetChecked(db.groupPredictor ~= false)

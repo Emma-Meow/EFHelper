@@ -45,6 +45,7 @@ local dbDefaults = {
             showRested = true,
             showZeroXp = true,
             showMobInfo = false,
+            showEfficiency = true,
             fontSize = 18,
             posX = 0,
             posY = 130,

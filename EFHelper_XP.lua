@@ -30,6 +30,7 @@ function XP:GetDB()
             showRested = true,
             showZeroXp = true,
             showMobInfo = false,
+            showEfficiency = true,
             fontSize = 18,
             posX = 0,
             posY = 130,
@@ -43,6 +44,9 @@ function XP:GetDB()
 
     if db.showMobInfo == nil then
         db.showMobInfo = false
+    end
+    if db.showEfficiency == nil then
+        db.showEfficiency = true
     end
 
     if db.groupPredictor == nil then
@@ -163,6 +167,56 @@ local function RoundHalfToEven(val)
     end
 end
 XP.RoundHalfToEven = RoundHalfToEven
+
+-- ----------------------------------------------------------------------------
+-- Expected Creature Health (ExpectedStat.db2) & 5-Level Bracket Modifiers
+-- ----------------------------------------------------------------------------
+-- Datamined ExpectedStat.CreatureHealth values for ExpansionID = -2 (Levels 1-85)
+local EXPECTED_CREATURE_HEALTH = {
+    42,   55,   71,   86,   102,  120,  137,  156,  180,  208,  -- 1-10
+    239,  272,  307,  345,  385,  427,  473,  521,  572,  629,  -- 11-20
+    677,  731,  787,  846,  909,  975,  1040, 1109, 1177, 1242, -- 21-30
+    1308, 1374, 1443, 1512, 1586, 1660, 1737, 1814, 1897, 1981, -- 31-40
+    2061, 2146, 2231, 2317, 2402, 2495, 2587, 2681, 2779, 2909, -- 41-50
+    3040, 3174, 3317, 3458, 3602, 3755, 3909, 4105, 4234, 4365, -- 51-60
+    4496, 4629, 4763, 4453, 4581, 4711, 4846, 4984, 5123, 5265, -- 61-70
+    5412, 5561, 5719, 5881, 6048, 6215, 6391, 6568, 6752, 6945, -- 71-80
+    7140, 7341, 7550, 7762, 7983,                               -- 81-85
+}
+
+-- Level-bracket HP modifiers applied on top of ExpectedStat.CreatureHealth
+local LEVEL_HP_MODIFIERS = {
+    { maxLevel = 19, mod = 1.00 },
+    { maxLevel = 24, mod = 1.02 },
+    { maxLevel = 29, mod = 1.05 },
+    { maxLevel = 34, mod = 1.10 },
+    { maxLevel = 39, mod = 1.15 },
+    { maxLevel = 44, mod = 1.20 },
+    { maxLevel = 49, mod = 1.25 },
+    { maxLevel = 54, mod = 1.30 },
+    { maxLevel = 59, mod = 1.35 },
+    { maxLevel = 85, mod = 1.40 },
+}
+
+--- Returns the level-bracket HP multiplier for a given mob level
+function XP:GetLevelHPModifier(mobLevel)
+    if not mobLevel or mobLevel < 1 then return 1.00 end
+    for _, entry in ipairs(LEVEL_HP_MODIFIERS) do
+        if mobLevel <= entry.maxLevel then
+            return entry.mod
+        end
+    end
+    return 1.40
+end
+
+--- Calculates the expected baseline Max HP for a mob of a given level
+function XP:CalculateExpectedHP(mobLevel)
+    if not mobLevel or mobLevel < 1 then return nil end
+    local baseHP = EXPECTED_CREATURE_HEALTH[mobLevel]
+    if not baseHP then return nil end
+    local mod = XP:GetLevelHPModifier(mobLevel)
+    return RoundHalfToEven(baseHP * mod), baseHP, mod
+end
 
 -- ----------------------------------------------------------------------------
 -- Instance & Dungeon Detection Helpers
@@ -454,7 +508,7 @@ function XP:GetOrCreateHUD()
 
     local db = XP:GetDB()
     local f = _G["EFHelperXPHUD"] or CreateFrame("Frame", "EFHelperXPHUD", UIParent)
-    f:SetSize(460, 36)
+    f:SetSize(460, 52)
     f:SetPoint("CENTER", UIParent, "CENTER", db.posX or 0, db.posY or 130)
     f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
@@ -850,12 +904,13 @@ function XP:UpdateHUD()
         local previewPct = FormatXPPercentage(165)
         if previewPct == "" then previewPct = " |cffcccccc(1.8%)|r" end
         local dngTag = (isDungeon and db.showMobInfo) and " |cffffa500[Dungeon 0.4x]|r" or ""
+        local effPreview = (db.showEfficiency ~= false) and "\n|cffccccccEff: 17.3|r |cff888888|| HP: |cffffffff954|r / 954|r" or ""
         if XP:IsGroupActive() or db.groupPredictor then
             local partyTag = db.showMobInfo and " |cff00ccff[Party Preview]|r" or " |cff888888[Preview Mode]|r"
-            hud.text:SetText("|cffffd100+135 XP|r" .. previewPct .. dngTag .. partyTag)
+            hud.text:SetText("|cffffd100+135 XP|r" .. previewPct .. dngTag .. partyTag .. effPreview)
         else
             local restedPreview = db.showRested and " |cff00ffff(+165 Rested)|r" or ""
-            hud.text:SetText("|cffffd100+165 XP|r" .. restedPreview .. previewPct .. dngTag .. " |cff888888[Preview Mode]|r")
+            hud.text:SetText("|cffffd100+165 XP|r" .. restedPreview .. previewPct .. dngTag .. " |cff888888[Preview Mode]|r" .. effPreview)
         end
         hud:Show()
         return
@@ -988,6 +1043,21 @@ function XP:UpdateHUD()
         end
         if isDungeon then
             xpString = xpString .. " |cffffa500[Dungeon 0.4x]|r"
+        end
+    end
+
+    -- Optional 2nd line: XP Efficiency (XP / ExpectedHP * 100) & Actual (secret) vs. Expected Max HP
+    if db.showEfficiency ~= false then
+        local expectedHP = XP:CalculateExpectedHP(mobLevel)
+        if expectedHP and expectedHP > 0 then
+            local effScore = (xp / expectedHP) * 100
+            local effPrefix = string.format("\n|cffccccccEff: %.1f|r", effScore)
+            local actualMaxHP = UnitHealthMax and UnitHealthMax("target")
+            if actualMaxHP then
+                xpString = xpString .. effPrefix .. " |cff888888|| HP: |cffffffff" .. actualMaxHP .. "|r / " .. tostring(expectedHP) .. "|r"
+            else
+                xpString = xpString .. effPrefix .. string.format(" |cff888888|| HP: ?? / %d|r", expectedHP)
+            end
         end
     end
 

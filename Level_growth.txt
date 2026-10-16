@@ -1,0 +1,26 @@
+Ghostpaw Howler:
+    23: 803
+    24: 863
+
+    relative difference 863/803: 1.074719 
+    absolute difference 863-803: 60
+
+Sparkleshell:
+    30: 1366
+    31: 1439
+
+    relative difference: 1439/1366: 1.0534
+    absolute difference: 73
+
+ExpectedStats.HP value:
+    23: 787
+    24: 846
+
+    relative difference 846/787: 1.07496
+    absolute difference 846-787: 59
+
+    30: 1242
+    31: 1308
+
+    relative difference: 1308/1242: 1.05314
+    absolute difference: 66
