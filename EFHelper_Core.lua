@@ -19,6 +19,9 @@ local dbDefaults = {
         hudShown = false,
         hudLocked = false,
         hudPosition = nil,
+        ffaAutoLootEnabled = true,
+        ffaAutoLootLocked = false,
+        ffaAutoLootPos = nil,
 
         Campfire = {
             enabled = true,
@@ -260,6 +263,171 @@ function EFHelper:OnInitialize()
     if EFHelperCharDB.lastMobName then self.db.profile.lastMobName = EFHelperCharDB.lastMobName end
     if EFHelperCharDB.activeRouteIndex then self.db.profile.activeRouteIndex = EFHelperCharDB.activeRouteIndex end
     if EFHelperCharDB.hudShown ~= nil then self.db.profile.hudShown = EFHelperCharDB.hudShown end
+end
+
+function EFHelper:OnEnable()
+    self:RegisterEvent("PLAYER_ENTERING_WORLD", "UpdateFFAAutoLootWidget")
+    self:RegisterEvent("GROUP_ROSTER_UPDATE", "UpdateFFAAutoLootWidget")
+    self:RegisterEvent("PARTY_LOOT_METHOD_CHANGED", "UpdateFFAAutoLootWidget")
+    self:RegisterEvent("CVAR_UPDATE", "OnCVarUpdate")
+    self:UpdateFFAAutoLootWidget()
+end
+
+-- ----------------------------------------------------------------------------
+-- Lightweight Free-For-All (FFA) Auto-Loot Toggle Widget
+-- ----------------------------------------------------------------------------
+local function IsAutoLootEnabled()
+    local val
+    if GetCVar then
+        local ok, res = pcall(GetCVar, "autoLootDefault")
+        if ok then val = res end
+    elseif C_CVar and C_CVar.GetCVar then
+        local ok, res = pcall(C_CVar.GetCVar, "autoLootDefault")
+        if ok then val = res end
+    end
+    return tostring(val) == "1"
+end
+
+local function SetAutoLootEnabled(enable)
+    local targetVal = enable and "1" or "0"
+    if SetCVar then
+        pcall(SetCVar, "autoLootDefault", targetVal)
+    elseif C_CVar and C_CVar.SetCVar then
+        pcall(C_CVar.SetCVar, "autoLootDefault", targetVal)
+    end
+end
+
+local function IsGroupFreeForAll()
+    if not IsInGroup() then
+        return false
+    end
+    return C_PartyInfo.GetLootMethod() == 0
+end
+
+function EFHelper:GetOrCreateFFAAutoLootButton()
+    if self.ffaAutoLootBtn then
+        return self.ffaAutoLootBtn
+    end
+
+    local btn = UI.CreateBackdropFrame("Button", "EFHelperFFAAutoLootButton", UIParent, 124, 22)
+    btn:SetFrameStrata("MEDIUM")
+    btn:SetClampedToScreen(true)
+    btn:SetMovable(true)
+    btn:EnableMouse(true)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:RegisterForDrag("LeftButton")
+
+    local pos = self.db and self.db.profile and self.db.profile.ffaAutoLootPos
+    if pos and pos.point then
+        btn:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or -90)
+    else
+        btn:SetPoint("TOP", UIParent, "TOP", 0, -90)
+    end
+
+    -- Left status indicator bar
+    local accent = btn:CreateTexture(nil, "ARTWORK")
+    accent:SetSize(3, 14)
+    accent:SetPoint("LEFT", btn, "LEFT", 5, 0)
+    accent:SetTexture("Interface\\Buttons\\WHITE8X8")
+    btn.accent = accent
+
+    -- Status dot
+    local dot = btn:CreateTexture(nil, "ARTWORK")
+    dot:SetSize(6, 6)
+    dot:SetPoint("LEFT", accent, "RIGHT", 5, 0)
+    dot:SetTexture("Interface\\Buttons\\WHITE8X8")
+    btn.dot = dot
+
+    -- Text label
+    local label = btn:CreateFontString(nil, "OVERLAY")
+    UI.SetupFontString(label, 11, "OUTLINE")
+    label:SetPoint("LEFT", dot, "RIGHT", 6, 0)
+    label:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
+    label:SetJustifyH("LEFT")
+    btn.label = label
+
+    btn:SetScript("OnDragStart", function(f)
+        if self.db and self.db.profile and self.db.profile.ffaAutoLootLocked then
+            return
+        end
+        f.isDragging = true
+        f:StartMoving()
+    end)
+    btn:SetScript("OnDragStop", function(f)
+        if not f.isDragging then return end
+        f.isDragging = false
+        f:StopMovingOrSizing()
+        local point, _, relPoint, x, y = f:GetPoint()
+        if self.db and self.db.profile then
+            self.db.profile.ffaAutoLootPos = {
+                point = point,
+                relPoint = relPoint,
+                x = math.floor((x or 0) + 0.5),
+                y = math.floor((y or 0) + 0.5),
+            }
+        end
+    end)
+
+    btn:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then
+            if self.db and self.db.profile then
+                self.db.profile.ffaAutoLootLocked = not self.db.profile.ffaAutoLootLocked
+            end
+            return
+        end
+        local newState = not IsAutoLootEnabled()
+        SetAutoLootEnabled(newState)
+        self:RefreshFFAAutoLootVisual()
+    end)
+
+    btn:Hide()
+    self.ffaAutoLootBtn = btn
+    return btn
+end
+
+function EFHelper:RefreshFFAAutoLootVisual()
+    local btn = self.ffaAutoLootBtn
+    if not btn then return end
+
+    local isOn = IsAutoLootEnabled()
+    btn:SetBackdropColor(0.05, 0.06, 0.08, 0.88)
+    if isOn then
+        btn:SetBackdropBorderColor(0.18, 0.55, 0.32, 0.90)
+        btn.accent:SetVertexColor(0.20, 0.90, 0.45, 1.0)
+        btn.dot:SetVertexColor(0.20, 0.90, 0.45, 1.0)
+        btn.label:SetText("|cffc8d0dcAutoLoot:|r |cff33ee77ON|r")
+    else
+        btn:SetBackdropBorderColor(0.60, 0.22, 0.22, 0.90)
+        btn.accent:SetVertexColor(0.95, 0.32, 0.32, 1.0)
+        btn.dot:SetVertexColor(0.95, 0.32, 0.32, 1.0)
+        btn.label:SetText("|cffc8d0dcAutoLoot:|r |cffff5555OFF|r")
+    end
+end
+
+function EFHelper:UpdateFFAAutoLootWidget()
+    local enabled = not (self.db and self.db.profile and self.db.profile.ffaAutoLootEnabled == false)
+    if enabled and IsGroupFreeForAll() then
+        local btn = self:GetOrCreateFFAAutoLootButton()
+        self:RefreshFFAAutoLootVisual()
+        btn:Show()
+    elseif self.ffaAutoLootBtn then
+        self.ffaAutoLootBtn:Hide()
+    end
+end
+
+function EFHelper:OnCVarUpdate(_, cvarName)
+    if not cvarName or Utils.IsSecret(cvarName) then
+        if self.ffaAutoLootBtn and self.ffaAutoLootBtn:IsShown() then
+            self:RefreshFFAAutoLootVisual()
+        end
+        return
+    end
+    local lower = tostring(cvarName):lower()
+    if lower == "autolootdefault" or lower == "auto_loot_default_text" then
+        if self.ffaAutoLootBtn and self.ffaAutoLootBtn:IsShown() then
+            self:RefreshFFAAutoLootVisual()
+        end
+    end
 end
 
 function EFHelper:ToggleConfig(tabIndex)

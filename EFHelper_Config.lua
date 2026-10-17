@@ -394,9 +394,23 @@ local function CreateTaggingPanel(parent)
     hint:SetPoint("TOPLEFT", createMacroBtn, "BOTTOMLEFT", 0, -8)
     hint:SetText("Saves to Character Macros (/m). Drag the macro to your action bar.")
 
+    -- 4b. Lightweight FFA Auto-Loot Toggle Setting
+    local ffaCb = CreateFrame("CheckButton", "EFHelperConfigFFAAutoLoot", p, "InterfaceOptionsCheckButtonTemplate")
+    ffaCb:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", -2, -6)
+    _G[ffaCb:GetName() .. "Text"]:SetText("Show Auto-Loot Toggle Button while in Free-For-All Group")
+    ffaCb:SetScript("OnClick", function(self)
+        if EFHelper.db and EFHelper.db.profile then
+            EFHelper.db.profile.ffaAutoLootEnabled = self:GetChecked() and true or false
+        end
+        if EFHelper.UpdateFFAAutoLootWidget then
+            EFHelper:UpdateFFAAutoLootWidget()
+        end
+    end)
+    p.ffaCb = ffaCb
+
     -- 5. Information Box
     local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -14)
+    infoBox:SetPoint("TOPLEFT", ffaCb, "BOTTOMLEFT", 2, -6)
     infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
     infoBox:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -416,7 +430,7 @@ local function CreateTaggingPanel(parent)
         "|cffffd100Tagging & Macro Hub Features:|r\n" ..
         "• |cffffffffInstant Tagging|r: Generates a macro that instantly acquires target and casts your selected spell.\n" ..
         "• |cffffffffRaid Ping|r: Automatically drops a skull raid target marker on the target to alert party members.\n" ..
-        "• |cffffffffMacro Slots|r: Save up to 3 separate named macros (EFTag, EFTag2, EFHRXP) in your Character Macros.\n" ..
+        "• |cffffffffFFA Auto-Loot Toggle|r: Displays a compact floating toggle when party loot is set to Free-For-All.\n" ..
         "• |cffffffffTarget Mirror|r: Press 'Get Target' while targeting any mob to populate the name automatically.\n" ..
         "• Slash commands: |cff00ffff/efh|r (config) or drag the macro from |cff00ffff/m|r directly to your action bar."
     )
@@ -433,6 +447,10 @@ local function CreateTaggingPanel(parent)
         local lastSpell = (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.lastSpell) or EFHelper.selectedSpell
         if lastSpell then
             self.spellDropdown:SetText(lastSpell)
+        end
+        if self.ffaCb then
+            local enabled = not (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.ffaAutoLootEnabled == false)
+            self.ffaCb:SetChecked(enabled)
         end
         self.feedback:SetText("")
     end
