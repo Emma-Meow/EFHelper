@@ -79,6 +79,13 @@ local dbDefaults = {
             toastDuration = 4.0,
             sound = true,
             hideHigherLevels = false,
+            toastPos = nil,
+        },
+
+        WaypointBridge = {
+            enabled = true,
+            showStepSummary = true,
+            colorByType = true,
         },
     },
     char = {

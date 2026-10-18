@@ -51,6 +51,11 @@ local MODULE_TABS = {
         subtext = "Auto-train & toast",
         icon = "Interface\\Icons\\INV_Misc_Book_06",
     },
+    {
+        name = "Waypoint Bridge",
+        subtext = "RXP to WaypointUI",
+        icon = "Interface\\Icons\\INV_Misc_Map_01",
+    },
 }
 
 local function SelectTab(tabIndex)
@@ -1369,7 +1374,7 @@ local function CreateTrainSpellsPanel(parent)
         "• |cffffffffTrainer Integration|r: Adds a 'Train Selected' button directly to class trainer windows.\n" ..
         "• |cffffffffTrade Safe|r: Strictly ignores tradeskill trainers (never auto-buys profession recipes).\n" ..
         "• |cffffffffSpellbook View|r: View all 1-60 trainable spells, ranks, and gold costs for your class.\n" ..
-        "• |cffffffffLevel-Up Toast|r: Unmovable banner notifying you of newly unlocked trainer abilities.\n" ..
+        "• |cffffffffLevel-Up Toast|r: Compact list of all newly unlocked spells (drag while Test Toast is active to move).\n" ..
         "• Configuration: Use the checkboxes above to toggle auto-training, spellbook tab, and toast alerts."
     )
 
@@ -1385,6 +1390,198 @@ local function CreateTrainSpellsPanel(parent)
             durationSlider:SetValue(dur)
             _G[durationSlider:GetName() .. "Text"]:SetText(string.format("Duration: %.1fs", dur))
         end
+    end
+
+    return p
+end
+
+-- ----------------------------------------------------------------------------
+-- Panel 7: Waypoint Bridge (RestedXP -> WaypointUI Translation Layer)
+-- ----------------------------------------------------------------------------
+local function CreateWaypointBridgePanel(parent)
+    local p = CreateFrame("Frame", nil, parent)
+    p:SetAllPoints()
+
+    local WaypointBridge = addonTable.WaypointBridge or EFHelper.WaypointBridge
+
+    -- Title & Description
+    local title = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+    title:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -18)
+    title:SetText("RestedXP -> WaypointUI 3D Bridge")
+
+    local desc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    desc:SetPoint("RIGHT", p, "RIGHT", -20, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("Dynamically translates your active RestedXP objective into a 3D world beacon in WaypointUI without modifying either addon.")
+
+    -- 1. Enable Checkbox
+    local enableCb = CreateFrame("CheckButton", "EFHelperConfigWaypointBridgeEnable", p, "InterfaceOptionsCheckButtonTemplate")
+    enableCb:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
+    _G[enableCb:GetName() .. "Text"]:SetText("Enable RestedXP -> WaypointUI 3D Bridge")
+    enableCb:SetScript("OnClick", function(self)
+        if WaypointBridge then
+            local db = WaypointBridge:GetDB()
+            db.enabled = self:GetChecked() and true or false
+            if db.enabled then
+                WaypointBridge:Enable()
+                WaypointBridge:SyncObjective(true)
+            else
+                WaypointBridge:ClearSyncedWaypoint()
+                WaypointBridge:Disable()
+            end
+            p:OnRefresh()
+        end
+    end)
+    p.enableCb = enableCb
+
+    -- 2. Show Rich Step Context Summary Checkbox
+    local summaryCb = CreateFrame("CheckButton", "EFHelperConfigWaypointBridgeSummary", p, "InterfaceOptionsCheckButtonTemplate")
+    summaryCb:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -2)
+    _G[summaryCb:GetName() .. "Text"]:SetText("Show Step Context Summary (NPCs, Mobs, & Live Objective Progress)")
+    summaryCb:SetScript("OnClick", function(self)
+        if WaypointBridge then
+            local db = WaypointBridge:GetDB()
+            db.showStepSummary = self:GetChecked() and true or false
+            WaypointBridge:SyncObjective(true)
+            p:OnRefresh()
+        end
+    end)
+    p.summaryCb = summaryCb
+
+    -- 3. Alter Waypoint Icon & Color by Objective Type Checkbox
+    local colorCb = CreateFrame("CheckButton", "EFHelperConfigWaypointBridgeColor", p, "InterfaceOptionsCheckButtonTemplate")
+    colorCb:SetPoint("TOPLEFT", summaryCb, "BOTTOMLEFT", 0, -2)
+    _G[colorCb:GetName() .. "Text"]:SetText("Alter Waypoint Icon & Color by Objective Type (Kill, Loot, Turn-In, Accept, etc.)")
+    colorCb:SetScript("OnClick", function(self)
+        if WaypointBridge then
+            local db = WaypointBridge:GetDB()
+            db.colorByType = self:GetChecked() and true or false
+            WaypointBridge:SyncObjective(true)
+            p:OnRefresh()
+        end
+    end)
+    p.colorCb = colorCb
+
+    -- 4. Live Status Box
+    local statusBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    statusBox:SetPoint("TOPLEFT", colorCb, "BOTTOMLEFT", 0, -8)
+    statusBox:SetPoint("RIGHT", p, "RIGHT", -20, 0)
+    statusBox:SetHeight(92)
+    statusBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    statusBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
+    statusBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
+
+    local statusText = statusBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    statusText:SetPoint("TOPLEFT", statusBox, "TOPLEFT", 10, -8)
+    statusText:SetPoint("BOTTOMRIGHT", statusBox, "BOTTOMRIGHT", -10, 8)
+    statusText:SetJustifyH("LEFT")
+    statusText:SetJustifyV("TOP")
+    p.statusText = statusText
+
+    -- 5. Action Buttons (Force Re-Sync & Clear Bridge Waypoint)
+    local syncBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    syncBtn:SetSize(180, 26)
+    syncBtn:SetPoint("TOPLEFT", statusBox, "BOTTOMLEFT", 0, -10)
+    syncBtn:SetText("Force Re-Sync Waypoint")
+    syncBtn:SetScript("OnClick", function()
+        if WaypointBridge and WaypointBridge.SyncObjective then
+            WaypointBridge:SyncObjective(true)
+            p:OnRefresh()
+        end
+    end)
+
+    local clearBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    clearBtn:SetSize(180, 26)
+    clearBtn:SetPoint("LEFT", syncBtn, "RIGHT", 12, 0)
+    clearBtn:SetText("Clear Bridge Waypoint")
+    clearBtn:SetScript("OnClick", function()
+        if WaypointBridge and WaypointBridge.ClearSyncedWaypoint then
+            WaypointBridge:ClearSyncedWaypoint()
+            p:OnRefresh()
+        end
+    end)
+
+    -- 6. Information Box
+    local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
+    infoBox:SetPoint("TOPLEFT", syncBtn, "BOTTOMLEFT", 0, -10)
+    infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
+    infoBox:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    infoBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
+    infoBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
+
+    local infoText = infoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    infoText:SetPoint("TOPLEFT", infoBox, "TOPLEFT", 10, -8)
+    infoText:SetPoint("BOTTOMRIGHT", infoBox, "BOTTOMRIGHT", -10, 8)
+    infoText:SetJustifyH("LEFT")
+    infoText:SetJustifyV("TOP")
+    infoText:SetText(
+        "|cffffd100Waypoint Bridge Behavior & Design:|r\n" ..
+        "• |cffffffffStep Context Summary|r: Extracts associated NPCs (|cff00ffff.target|r), Mobs (|cff00ffff.mob|r), and live quest progress (|cff00ffff.complete|r / |cff00ffff.collect|r) and updates counts in real time.\n" ..
+        "• |cffffffffObjective Visuals|r: Customizes the 3D beacon's icon & beam color by action (Kill, Loot, Turn-In, Accept, Train, Flight).\n" ..
+        "• |cffffffffSpawn Loop Protection|r: Locks |cff00ffff#loop|r / |cff00ffff.loop|r steps to their 1st coordinate while still updating live kill/loot counters.\n" ..
+        "• |cffffffffSuperTrack Guard|r: Prevents RXP's quest tracker from overriding WaypointUI's custom navigation text."
+    )
+
+    p.OnRefresh = function(self)
+        if not WaypointBridge then return end
+        local db = WaypointBridge:GetDB()
+        local isEnabled = (db.enabled ~= false)
+        enableCb:SetChecked(isEnabled)
+        summaryCb:SetChecked(db.showStepSummary ~= false)
+        colorCb:SetChecked(db.colorByType ~= false)
+
+        local info = WaypointBridge.GetStatusInfo and WaypointBridge:GetStatusInfo() or {}
+        local rxpStr = info.rxpLoaded and "|cff00ff00Loaded|r" or "|cffff4444Not Loaded|r"
+        local wuiStr = info.wuiLoaded and "|cff00ff00Loaded|r" or "|cffff4444Not Loaded|r"
+
+        if not isEnabled then
+            statusText:SetText(string.format(
+                "|cffffd100AddOn Status:|r RXPGuides: %s  |  WaypointUI: %s\n" ..
+                "|cffff4444Bridge Status: Disabled|r",
+                rxpStr, wuiStr
+            ))
+            syncBtn:Disable()
+            clearBtn:Disable()
+            return
+        end
+
+        syncBtn:Enable()
+        clearBtn:Enable()
+
+        local activeLine
+        if info.lastMapID and info.lastX and info.lastY then
+            local loopTag = info.isLoopLocked and " |cff00ffff[Loop Locked: 1st Point]|r" or ""
+            local catTag = info.lastCategory and (" |cff00ff99[" .. info.lastCategory .. "]|r") or ""
+            local flatTitle = (info.lastTitle or "Objective"):gsub("\n", "  |cff888888•|r  ")
+            activeLine = string.format(
+                "|cffffd100Objective:%s|r |cffffffff%s|r\n" ..
+                "|cffffd100Coordinates:|r Map |cff00ffff%d|r — |cff00ff00(%.1f, %.1f)|r%s",
+                catTag,
+                flatTitle,
+                info.lastMapID,
+                info.lastX,
+                info.lastY,
+                loopTag
+            )
+        else
+            activeLine = "|cffffd100Synced Objective:|r |cff888888None (Waiting for active RXP waypoint)|r"
+        end
+
+        statusText:SetText(string.format(
+            "|cffffd100AddOn Status:|r RXPGuides: %s  |  WaypointUI: %s\n%s",
+            rxpStr, wuiStr, activeLine
+        ))
     end
 
     return p
@@ -1466,6 +1663,7 @@ function Config:GetOrCreateWindow()
     panels[4] = CreateXPPanel(contentArea)
     panels[5] = CreateXPBarPanel(contentArea)
     panels[6] = CreateTrainSpellsPanel(contentArea)
+    panels[7] = CreateWaypointBridgePanel(contentArea)
 
     -- Default to Tab 1
     SelectTab(1)

@@ -239,7 +239,7 @@ function TrainSpells:OnSpellsChanged()
 end
 
 -- ----------------------------------------------------------------------------
--- Feature 2: Level-Up Toast Popup (Unmovable, Brief Banner)
+-- Feature 2: Compact Level-Up Trainable Spells Toast
 -- ----------------------------------------------------------------------------
 function TrainSpells:PLAYER_LEVEL_UP(event, newLevel)
     local db = self:GetDB()
@@ -248,105 +248,175 @@ function TrainSpells:PLAYER_LEVEL_UP(event, newLevel)
     end
 
     if not db.enabled or not db.showLevelUpToast then return end
-    self:ShowLevelUpToast(newLevel)
+    self:ShowLevelUpToast(newLevel, false)
 end
 
 local toastFrame = nil
 local toastFadeTimer = nil
+local toastRows = {}
+local TOAST_WIDTH = 264
+local TOAST_ROW_HEIGHT = 28
+local TOAST_ROW_GAP = 4
+local TOAST_ROW_PITCH = TOAST_ROW_HEIGHT + TOAST_ROW_GAP
+local TOAST_TOP_OFFSET = 27
+local TOAST_BOTTOM_PAD = 7
+
+local function StartToastFadeTimer(f, duration)
+    if toastFadeTimer then
+        toastFadeTimer:Cancel()
+        toastFadeTimer = nil
+    end
+    if UIFrameFadeRemoveFrame then
+        pcall(UIFrameFadeRemoveFrame, f)
+    end
+    f:SetAlpha(1.0)
+    toastFadeTimer = C_Timer.NewTimer(duration or 4.0, function()
+        if f:IsShown() and not f.isDragging then
+            if UIFrameFadeOut then
+                pcall(UIFrameFadeOut, f, 0.5, 1.0, 0)
+                C_Timer.After(0.5, function()
+                    if f:GetAlpha() <= 0.05 then f:Hide() end
+                end)
+            else
+                f:Hide()
+            end
+        end
+    end)
+end
+
+function TrainSpells:ApplyToastPosition(f)
+    local db = self:GetDB()
+    f:ClearAllPoints()
+    if db.toastPos and db.toastPos.point then
+        f:SetPoint(db.toastPos.point, UIParent, db.toastPos.relPoint or db.toastPos.point, db.toastPos.x or 340, db.toastPos.y or 105)
+    else
+        f:SetPoint("TOPLEFT", UIParent, "CENTER", 340, 105)
+    end
+end
 
 function TrainSpells:GetOrCreateToastFrame()
     if toastFrame then return toastFrame end
 
-    local f = CreateFrame("Frame", "EFHelper_LevelUpToastFrame", UIParent, "BackdropTemplate")
-    f:SetSize(360, 100)
-    f:SetPoint("TOP", UIParent, "TOP", 0, -140)
+    local f = UI.CreateBackdropFrame("Frame", "EFHelper_LevelUpToastFrame", UIParent, TOAST_WIDTH, 56)
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetClampedToScreen(true)
+    f:SetMovable(true)
     f:EnableMouse(false)
+    f:RegisterForDrag("LeftButton")
 
-    -- Unmovable: No dragging scripts attached
-    f:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    f:SetBackdropColor(0.04, 0.07, 0.12, 0.92)
-    f:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.85)
+    f:SetBackdropColor(0.04, 0.05, 0.07, 0.90)
+    f:SetBackdropBorderColor(0.22, 0.25, 0.30, 0.90)
 
-    -- Top Header: "You've Reached"
-    local topHeader = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    topHeader:SetPoint("TOP", f, "TOP", 0, -8)
-    topHeader:SetText("You've Reached")
-    f.topHeader = topHeader
+    self:ApplyToastPosition(f)
 
-    -- Level Title: "Level 9"
-    local levelTitle = f:CreateFontString(nil, "ARTWORK", "GameFontNormalHuge")
-    levelTitle:SetPoint("TOP", topHeader, "BOTTOM", 0, -2)
-    levelTitle:SetText("|cffffd100Level 9|r")
-    f.levelTitle = levelTitle
+    -- Compact Header Row
+    local headerLeft = f:CreateFontString(nil, "OVERLAY")
+    UI.SetupFontString(headerLeft, 12, "OUTLINE")
+    headerLeft:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -6)
+    headerLeft:SetJustifyH("LEFT")
+    headerLeft:SetText("|cff55ff55Newly Trainable|r")
+    f.headerLeft = headerLeft
 
-    -- Glowing divider line
+    local headerRight = f:CreateFontString(nil, "OVERLAY")
+    UI.SetupFontString(headerRight, 12, "OUTLINE")
+    headerRight:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -6)
+    headerRight:SetJustifyH("RIGHT")
+    headerRight:SetText("")
+    f.headerRight = headerRight
+
     local divider = f:CreateTexture(nil, "ARTWORK")
-    divider:SetSize(320, 1)
-    divider:SetPoint("TOP", levelTitle, "BOTTOM", 0, -6)
-    divider:SetColorTexture(0.85, 0.70, 0.25, 0.7)
+    divider:SetHeight(1)
+    divider:SetPoint("TOPLEFT", f, "TOPLEFT", 8, -22)
+    divider:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -22)
+    divider:SetColorTexture(0.22, 0.25, 0.30, 0.85)
     f.divider = divider
 
-    -- Gold pip dot in center
-    local pip = f:CreateTexture(nil, "OVERLAY")
-    pip:SetSize(6, 6)
-    pip:SetPoint("CENTER", divider, "CENTER", 0, 0)
-    pip:SetColorTexture(1.0, 0.85, 0.35, 1.0)
-    f.pip = pip
+    f:SetScript("OnDragStart", function(frame)
+        if not frame.isTestMode then return end
+        frame.isDragging = true
+        if toastFadeTimer then
+            toastFadeTimer:Cancel()
+            toastFadeTimer = nil
+        end
+        if UIFrameFadeRemoveFrame then
+            pcall(UIFrameFadeRemoveFrame, frame)
+        end
+        frame:SetAlpha(1.0)
+        frame:StartMoving()
+    end)
 
-    -- Spell Icon (38x38)
-    local iconFrame = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    iconFrame:SetSize(38, 38)
-    iconFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -50)
-    iconFrame:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    iconFrame:SetBackdropBorderColor(0.85, 0.70, 0.25, 0.9)
-    f.iconFrame = iconFrame
+    f:SetScript("OnDragStop", function(frame)
+        if not frame.isDragging then return end
+        frame.isDragging = false
+        frame:StopMovingOrSizing()
 
-    local iconTex = iconFrame:CreateTexture(nil, "ARTWORK")
-    iconTex:SetAllPoints()
-    f.iconTex = iconTex
+        local cx, cy = UIParent:GetCenter()
+        local left, top = frame:GetLeft(), frame:GetTop()
+        local db = self:GetDB()
+        if cx and cy and left and top then
+            db.toastPos = {
+                point = "TOPLEFT",
+                relPoint = "CENTER",
+                x = math.floor((left - cx) + 0.5),
+                y = math.floor((top - cy) + 0.5),
+            }
+            self:ApplyToastPosition(frame)
+        else
+            local point, _, relPoint, x, y = frame:GetPoint()
+            db.toastPos = {
+                point = point or "TOPLEFT",
+                relPoint = relPoint or "CENTER",
+                x = math.floor((x or 340) + 0.5),
+                y = math.floor((y or 105) + 0.5),
+            }
+        end
 
-    -- Small Book Overlay Badge at bottom-left of icon (matches Image 3)
-    local bookBadge = iconFrame:CreateTexture(nil, "OVERLAY")
-    bookBadge:SetSize(14, 14)
-    bookBadge:SetPoint("BOTTOMLEFT", iconFrame, "BOTTOMLEFT", -3, -3)
-    bookBadge:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
-    f.bookBadge = bookBadge
-
-    -- Upper Line: "New Ability Trainable!" (Green font)
-    local upperText = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    upperText:SetPoint("TOPLEFT", iconFrame, "TOPRIGHT", 10, -2)
-    upperText:SetText("|cff00ff00New Ability Trainable!|r")
-    f.upperText = upperText
-
-    -- Lower Line: Ability Name & Rank + Cost
-    local lowerText = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    lowerText:SetPoint("TOPLEFT", upperText, "BOTTOMLEFT", 0, -4)
-    lowerText:SetPoint("RIGHT", f, "RIGHT", -12, 0)
-    lowerText:SetJustifyH("LEFT")
-    lowerText:SetText("|cffffd100Word of Glory|r — 40s")
-    f.lowerText = lowerText
-
-    -- Additional spells counter (if multiple spells unlock at this level)
-    local extraText = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    extraText:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 16, 6)
-    extraText:SetText("")
-    f.extraText = extraText
+        StartToastFadeTimer(frame, db.toastDuration or 4.0)
+    end)
 
     f:Hide()
     toastFrame = f
     self.toastFrame = f
     return f
+end
+
+local function GetOrCreateToastRow(parent, index)
+    if toastRows[index] then
+        return toastRows[index]
+    end
+
+    local yOffset = -TOAST_TOP_OFFSET - (index - 1) * TOAST_ROW_PITCH
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(TOAST_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yOffset)
+    row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -10, yOffset)
+
+    local icon = row:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(24, 24)
+    icon:SetPoint("LEFT", row, "LEFT", 0, 0)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    row.icon = icon
+
+    local costText = row:CreateFontString(nil, "OVERLAY")
+    UI.SetupFontString(costText, 11, "OUTLINE")
+    costText:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    costText:SetJustifyH("RIGHT")
+    row.costText = costText
+
+    local nameText = row:CreateFontString(nil, "OVERLAY")
+    UI.SetupFontString(nameText, 12, "OUTLINE")
+    nameText:SetJustifyH("LEFT")
+    nameText:SetWordWrap(false)
+    row.nameText = nameText
+
+    local rankText = row:CreateFontString(nil, "OVERLAY")
+    UI.SetupFontString(rankText, 10, "OUTLINE")
+    rankText:SetPoint("TOPLEFT", nameText, "BOTTOMLEFT", 0, -1)
+    rankText:SetJustifyH("LEFT")
+    row.rankText = rankText
+
+    toastRows[index] = row
+    return row
 end
 
 function TrainSpells:ShowLevelUpToast(newLevel, isTest)
@@ -356,10 +426,13 @@ function TrainSpells:ShowLevelUpToast(newLevel, isTest)
 
     -- Find unlocked spells for this level
     local unlocked = {}
+    local totalCost = 0
     if data then
         for _, spell in ipairs(data) do
             if spell.level == newLevel then
+                self:ResolveSpellData(spell)
                 table.insert(unlocked, spell)
+                totalCost = totalCost + (spell.cost or 0)
             end
         end
     end
@@ -367,10 +440,22 @@ function TrainSpells:ShowLevelUpToast(newLevel, isTest)
     local f = self:GetOrCreateToastFrame()
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     if f.Raise then f:Raise() end
-    f.levelTitle:SetText(string.format("|cffffd100Level %d|r", newLevel))
+
+    f.isTestMode = isTest and true or false
+    f:EnableMouse(f.isTestMode)
+
+    if f.isTestMode then
+        f.headerLeft:SetText("|cff55ff55Newly Trainable|r |cff88ccee[Drag]|r")
+    else
+        f.headerLeft:SetText("|cff55ff55Newly Trainable|r")
+    end
+
+    -- Hide all pooled rows first
+    for _, row in ipairs(toastRows) do
+        row:Hide()
+    end
 
     if #unlocked == 0 then
-        -- Find next level that has trainer abilities
         local nextUnlockLvl = nil
         if data then
             for _, spell in ipairs(data) do
@@ -382,40 +467,45 @@ function TrainSpells:ShowLevelUpToast(newLevel, isTest)
             end
         end
 
-        f.iconTex:SetTexture("Interface\\Icons\\INV_Misc_Book_06")
-        f.upperText:SetText("|cffffffffLevel Up!|r")
+        f.headerRight:SetText("")
+        local row = GetOrCreateToastRow(f, 1)
+        row.icon:SetTexture("Interface\\Icons\\INV_Misc_Book_06")
+        row.nameText:ClearAllPoints()
+        row.nameText:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+        row.nameText:SetPoint("RIGHT", row.costText, "LEFT", -6, 0)
         if nextUnlockLvl then
-            f.lowerText:SetText(string.format("|cffaaaaaa0 trainable abilities (Next at Level %d)|r", nextUnlockLvl))
+            row.nameText:SetText(string.format("|cffaaaaaaNone (Next: Lv %d)|r", nextUnlockLvl))
         else
-            f.lowerText:SetText("|cffaaaaaa0 trainable abilities at this level|r")
+            row.nameText:SetText("|cffaaaaaaNone at this level|r")
         end
-        f:SetHeight(98)
-        f.extraText:SetText("")
-        f.extraText:Hide()
+        row.rankText:SetText("")
+        row.rankText:Hide()
+        row.costText:SetText("")
+        row:Show()
+        f:SetHeight(TOAST_TOP_OFFSET + TOAST_ROW_HEIGHT + TOAST_BOTTOM_PAD)
     else
-        local firstSpell = unlocked[1]
-        local rankStr = firstSpell.rank and string.format(" (Rank %d)", firstSpell.rank) or ""
-        local costStr = self:FormatCost(firstSpell.cost)
-
-        f.iconTex:SetTexture(self:GetSpellIcon(firstSpell.name, firstSpell.spellID))
-
-        if firstSpell.rank and firstSpell.rank > 1 then
-            f.upperText:SetText("|cff00ff00New Rank Trainable!|r")
-        else
-            f.upperText:SetText("|cff00ff00New Ability Trainable!|r")
+        f.headerRight:SetText(self:FormatCost(totalCost))
+        for i, spell in ipairs(unlocked) do
+            local row = GetOrCreateToastRow(f, i)
+            row.icon:SetTexture(self:GetSpellIcon(spell.name, spell.spellID))
+            row.nameText:ClearAllPoints()
+            row.nameText:SetText(string.format("|cffffffff%s|r", spell.name or "Spell"))
+            if spell.rank then
+                row.nameText:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 8, -1)
+                row.nameText:SetPoint("RIGHT", row.costText, "LEFT", -6, 0)
+                row.rankText:SetText(string.format("|cff99a3b0Rank %d|r", spell.rank))
+                row.rankText:Show()
+            else
+                row.nameText:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+                row.nameText:SetPoint("RIGHT", row.costText, "LEFT", -6, 0)
+                row.rankText:SetText("")
+                row.rankText:Hide()
+            end
+            row.costText:SetText(self:FormatCost(spell.cost))
+            row:Show()
         end
-
-        f.lowerText:SetText(string.format("|cffffd100%s%s|r — Cost: %s", firstSpell.name, rankStr, costStr))
-
-        if #unlocked > 1 then
-            f:SetHeight(115)
-            f.extraText:SetText(string.format("|cff88ccee+ %d other trainable %s at level %d (View Spellbook)|r", #unlocked - 1, (#unlocked - 1 == 1 and "ability" or "abilities"), newLevel))
-            f.extraText:Show()
-        else
-            f:SetHeight(98)
-            f.extraText:SetText("")
-            f.extraText:Hide()
-        end
+        local rowsHeight = (#unlocked * TOAST_ROW_HEIGHT) + ((#unlocked - 1) * TOAST_ROW_GAP)
+        f:SetHeight(TOAST_TOP_OFFSET + rowsHeight + TOAST_BOTTOM_PAD)
     end
 
     -- Play sound if enabled or in test mode
@@ -428,40 +518,35 @@ function TrainSpells:ShowLevelUpToast(newLevel, isTest)
         end
     end
 
-    -- Cancel previous fade timer & clear Blizzard fade cache
-    if toastFadeTimer then
-        toastFadeTimer:Cancel()
-        toastFadeTimer = nil
-    end
-    if UIFrameFadeRemoveFrame then
-        pcall(UIFrameFadeRemoveFrame, f)
-    end
-
     f:Show()
     f:SetAlpha(1.0)
     if UIFrameFadeIn then
-        pcall(UIFrameFadeIn, f, 0.2, 0.6, 1.0)
+        pcall(UIFrameFadeIn, f, 0.15, 0.6, 1.0)
     end
 
-    -- Auto-fade out after duration
-    local duration = db.toastDuration or 4.0
-    toastFadeTimer = C_Timer.NewTimer(duration, function()
-        if f:IsShown() then
-            if UIFrameFadeOut then
-                pcall(UIFrameFadeOut, f, 0.75, 1.0, 0)
-                C_Timer.After(0.75, function()
-                    if f:GetAlpha() <= 0.05 then f:Hide() end
-                end)
-            else
-                f:Hide()
-            end
-        end
-    end)
+    StartToastFadeTimer(f, db.toastDuration or 4.0)
 end
 
 function TrainSpells:TestToast(level)
     local testLvl = level or UnitLevel("player") or 10
-    print(string.format("|cff0cd29f[EFHelper]|r Testing Trainer Toast notification (Level %d)...", testLvl))
+    local className = self:GetPlayerClassName()
+    local data = EFHelper_TrainerData and EFHelper_TrainerData[className]
+    if not level and data then
+        local hasAtCurrent = false
+        local fallbackLvl = nil
+        for _, spell in ipairs(data) do
+            if spell.level == testLvl then
+                hasAtCurrent = true
+                break
+            elseif spell.level <= testLvl and (not fallbackLvl or spell.level > fallbackLvl) then
+                fallbackLvl = spell.level
+            end
+        end
+        if not hasAtCurrent and fallbackLvl then
+            testLvl = fallbackLvl
+        end
+    end
+    print(string.format("|cff0cd29f[EFHelper]|r Testing Trainer Toast (Level %d — drag toast to reposition)...", testLvl))
     self:ShowLevelUpToast(testLvl, true)
 end
 

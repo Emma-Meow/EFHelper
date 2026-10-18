@@ -1,11 +1,10 @@
 ## Interface: 16001
 ## Interface-Camelot: 16001
-## Interface-Mainline: 120000
 ## Title: EFHelper
 ## Notes: Helper addon for WoW Forever (Midnight API)
 ## Author: Emma
 ## Version: 1.0.0
-## OptionalDeps: RXPGuides
+## OptionalDeps: RXPGuides, WaypointUI
 ## SavedVariables: EFHelperDB
 ## SavedVariablesPerCharacter: EFHelperCharDB
 
@@ -28,4 +27,5 @@ EFHelper_XP.lua
 EFHelper_XPBar.lua
 EFHelper_TrainerData.lua
 EFHelper_TrainSpells.lua
+EFHelper_WaypointBridge.lua
 EFHelper_Config.lua
