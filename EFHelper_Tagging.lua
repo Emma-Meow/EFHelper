@@ -73,7 +73,7 @@ function Tagging:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCh
     table.insert(bodyLines, "/cleartarget")
     table.insert(bodyLines, "/targetexact " .. mobName)
     table.insert(bodyLines, "/cleartarget [dead]")
-    table.insert(bodyLines, "/startattack")
+    table.insert(bodyLines, "/startattack [@target, nodead, exists]")
     if not isNone then
         table.insert(bodyLines, "/cast [@target, exists] " .. spellName)
     end
