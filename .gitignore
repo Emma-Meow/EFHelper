@@ -1,2 +1,5 @@
 /.vscode
 /__pycache__
+/expectedstats*
+/level_growth*
+/EFHelper_Route.lua

@@ -592,13 +592,40 @@ function Campfire:GetOrCreateDisplayFrame()
     f:SetBackdropColor(0.04, 0.05, 0.07, 0.35)
     f:SetBackdropBorderColor(0.15, 0.15, 0.2, 0.3)
 
+    f:SetScript("OnMouseDown", function(self, button)
+        local curDb = Campfire:GetDB()
+        local isLocked = (curDb.locked == true) and not Campfire.isTestMode
+        if isLocked and not (button == "RightButton" and IsShiftKeyDown()) then
+            if self.SetPropagateMouseClicks then
+                self:SetPropagateMouseClicks(true)
+            end
+        else
+            if self.SetPropagateMouseClicks then
+                self:SetPropagateMouseClicks(false)
+            end
+        end
+    end)
+
     -- Drag & Reposition Handlers
     f:SetScript("OnDragStart", function(self)
+        local curDb = Campfire:GetDB()
+        if curDb.locked and not Campfire.isTestMode then return end
         self:StartMoving()
     end)
     f:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
         Campfire:SaveDisplayPosition(self)
+    end)
+    f:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and IsShiftKeyDown() then
+            local curDb = Campfire:GetDB()
+            curDb.locked = not curDb.locked
+            print(string.format("|cff0cd29f[EFHelper Campfire]|r HUD is now %s.", curDb.locked and "|cffff5555Locked (click-through)|r" or "|cff55ff55Unlocked|r"))
+            Campfire:ApplyLockState()
+        end
+        if self.SetPropagateMouseClicks then
+            self:SetPropagateMouseClicks(false)
+        end
     end)
 
     -- Hover visuals and tooltip
@@ -669,6 +696,11 @@ function Campfire:GetOrCreateDisplayFrame()
     return f
 end
 
+function Campfire:ApplyLockState()
+    if not displayFrame then return end
+    displayFrame:EnableMouse(true)
+end
+
 -- Updates the HUD content based on active campfire state
 function Campfire:UpdateDisplay()
     local db = Campfire:GetDB()
@@ -678,6 +710,7 @@ function Campfire:UpdateDisplay()
     end
 
     local frame = Campfire:GetOrCreateDisplayFrame()
+    Campfire:ApplyLockState()
     local hasAura = Campfire:FindPlayerCampfireAura() ~= nil
 
     -- If not in test mode and no campfire buff is on the player, hide HUD

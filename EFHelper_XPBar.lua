@@ -665,9 +665,9 @@ function XPBar:GetOrCreateBarFrame()
         GameTooltip:AddLine("|cffffd100Shift-Click|r: Pause/Resume session tracker", 0.8, 0.8, 0.8)
         local cfg = XPBar:GetDB()
         if cfg.locked then
-            GameTooltip:AddLine("|cff777777Right-click to Unlock frame|r", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("|cff777777Shift-Right-click to Unlock frame|r", 0.6, 0.6, 0.6)
         else
-            GameTooltip:AddLine("|cff777777Drag to Move | Right-click to Lock frame|r", 0.6, 0.6, 0.6)
+            GameTooltip:AddLine("|cff777777Drag to Move | Shift-Right-click to Lock frame|r", 0.6, 0.6, 0.6)
         end
 
         GameTooltip:Show()
@@ -678,17 +678,17 @@ function XPBar:GetOrCreateBarFrame()
     end)
 
     f:SetScript("OnMouseUp", function(self, button)
-        if IsShiftKeyDown() then
-            XPBar:TogglePause()
+        if button == "RightButton" and IsShiftKeyDown() then
+            local cfg = XPBar:GetDB()
+            cfg.locked = not cfg.locked
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[EFHelper XPBar]|r Frame is now %s.", cfg.locked and "|cffff5555Locked|r" or "|cff55ff55Unlocked|r"))
             if self:IsMouseOver() then
                 self:GetScript("OnEnter")(self)
             end
             return
         end
-        if button == "RightButton" then
-            local cfg = XPBar:GetDB()
-            cfg.locked = not cfg.locked
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[EFHelper XPBar]|r Frame is now %s.", cfg.locked and "|cffff5555Locked|r" or "|cff55ff55Unlocked|r"))
+        if button == "LeftButton" and IsShiftKeyDown() then
+            XPBar:TogglePause()
             if self:IsMouseOver() then
                 self:GetScript("OnEnter")(self)
             end

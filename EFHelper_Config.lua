@@ -963,6 +963,9 @@ local function CreateXPPanel(parent)
     testBtn:SetScript("OnClick", function()
         if XP then
             XP.isTestMode = not XP.isTestMode
+            if XP.ApplyLockState then
+                XP:ApplyLockState()
+            end
             XP:UpdateHUD()
             testBtn:SetText(XP.isTestMode and "Stop Preview" or "Preview Display")
         end
@@ -1208,7 +1211,7 @@ local function CreateXPBarPanel(parent)
         "• |cffffffffShift + Left-Click bar|r: Toggle |cffffaa00Pause / Resume|r on session tracking.\n" ..
         "• |cffffffffRolling Window|r: Prevents metric inertia by averaging over the last N hours instead of whole session.\n" ..
         "• |cffffffffAutopause|r: Neglects 6 of 10 idle minutes if AFK, preserving long-session rate integrity.\n" ..
-        "• |cffffffffRight-Click bar|r: Toggle position Lock/Unlock. |cffffffffDrag|r to reposition when unlocked.\n" ..
+        "• |cffffffffShift-Right-Click bar|r: Toggle position Lock/Unlock. |cffffffffDrag|r to reposition when unlocked.\n" ..
         "• Slash commands: |cff00ffff/efh xpbar reset|r (reset session XP/hr), |cff00ffff/efh xpbar lock|r (lock/unlock position)."
     )
 

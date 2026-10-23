@@ -25,6 +25,7 @@ local dbDefaults = {
 
         Campfire = {
             enabled = true,
+            locked = false,
             sound = true,
             soundFile = "Interface\\AddOns\\EllesmereUI\\media\\sounds\\heroism.ogg",
             testMode = false,
@@ -35,6 +36,7 @@ local dbDefaults = {
 
         Swapper = {
             enabled = true,
+            locked = false,
             showHUD = false,
             dummyName = "",
             hudX = 0,
@@ -43,6 +45,7 @@ local dbDefaults = {
 
         XP = {
             enabled = true,
+            locked = false,
             showPercentage = true,
             showFeedback = true,
             showRested = true,
@@ -376,15 +379,19 @@ function EFHelper:GetOrCreateFFAAutoLootButton()
     end)
 
     btn:SetScript("OnClick", function(_, button)
-        if button == "RightButton" then
+        if button == "RightButton" and IsShiftKeyDown() then
             if self.db and self.db.profile then
                 self.db.profile.ffaAutoLootLocked = not self.db.profile.ffaAutoLootLocked
+                local isLocked = self.db.profile.ffaAutoLootLocked
+                print(string.format("|cff0cd29f[EFHelper FFA Loot]|r Frame is now %s.", isLocked and "|cffff5555Locked|r" or "|cff55ff55Unlocked|r"))
             end
             return
         end
-        local newState = not IsAutoLootEnabled()
-        SetAutoLootEnabled(newState)
-        self:RefreshFFAAutoLootVisual()
+        if button == "LeftButton" then
+            local newState = not IsAutoLootEnabled()
+            SetAutoLootEnabled(newState)
+            self:RefreshFFAAutoLootVisual()
+        end
     end)
 
     btn:Hide()
