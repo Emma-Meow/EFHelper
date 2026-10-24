@@ -20,7 +20,6 @@ Libs\AceTimer-3.0\AceTimer-3.0.xml
 # Core & Modules
 EFHelper_Core.lua
 EFHelper_Tagging.lua
-# EFHelper_Route.lua (Retired HUD module)
 EFHelper_Campfire.lua
 EFHelper_Swapper.lua
 EFHelper_XP.lua

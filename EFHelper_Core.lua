@@ -22,6 +22,7 @@ local dbDefaults = {
         ffaAutoLootEnabled = true,
         ffaAutoLootLocked = false,
         ffaAutoLootPos = nil,
+        silentTagClicks = true,
 
         Campfire = {
             enabled = true,
@@ -93,10 +94,21 @@ local dbDefaults = {
     },
     char = {
         lastSpell = nil,
-        currentProfile = nil,
         lastMobName = nil,
-        activeRouteIndex = nil,
-        hudShown = nil,
+        _migratedFromLegacy = false,
+        XPBar = {
+            sessionStartTime = nil,
+            sessionStartXP = nil,
+            sessionGainedXP = 0,
+            lastHeartbeat = nil,
+            levelBasePlayed = nil,
+            levelDingSessionSec = 0,
+            isManuallyPaused = false,
+            manualPauseStart = nil,
+            neglectedSec = 0,
+            lastXPTime = nil,
+            isAutoPaused = false,
+        },
     },
 }
 
@@ -253,6 +265,95 @@ function UI.CreateBackdropFrame(frameType, name, parent, width, height)
     return f
 end
 
+--- Unified frame draggable & lock behavior with Shift-Right-Click toggle and optional click-through propagation.
+-- @param frame Frame: The frame to make draggable/lockable
+-- @param getDbFn function: Returns the module db table containing the lock key and position data
+-- @param opts table:
+--   - moduleTag string: Prefix for chat messages (e.g. "[EFHelper XP]")
+--   - lockKey string: Key in db for lock state (defaults to "locked")
+--   - propagateClicksWhenLocked boolean: Whether to propagate clicks when locked (defaults to true)
+--   - onSavePos function(frame, db): Callback to persist new coordinates
+--   - isTestModeFn function(): Optional boolean returning whether test/preview mode is active
+--   - onRightClickUnlocked function(frame, db): Optional callback when right-clicked without Shift while unlocked
+--   - onLockChanged function(frame, isLocked, db): Optional callback after lock state toggles
+--   - onMouseUp function(frame, button, db): Optional callback for other mouse-up actions (when not dragging)
+function UI.MakeMovable(frame, getDbFn, opts)
+    if not frame or type(getDbFn) ~= "function" then return end
+    opts = opts or {}
+    local lockKey = opts.lockKey or "locked"
+    local propagateLocked = (opts.propagateClicksWhenLocked ~= false)
+
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+
+    local function IsLocked()
+        local db = getDbFn()
+        local testMode = opts.isTestModeFn and opts.isTestModeFn()
+        return (db and db[lockKey] == true) and not testMode
+    end
+
+    frame:SetScript("OnMouseDown", function(self, button)
+        if propagateLocked then
+            if IsLocked() and not (button == "RightButton" and IsShiftKeyDown()) then
+                if self.SetPropagateMouseClicks then
+                    self:SetPropagateMouseClicks(true)
+                end
+            else
+                if self.SetPropagateMouseClicks then
+                    self:SetPropagateMouseClicks(false)
+                end
+            end
+        end
+    end)
+
+    frame:SetScript("OnDragStart", function(self)
+        if IsLocked() then return end
+        self._isDragging = true
+        self:StartMoving()
+    end)
+
+    frame:SetScript("OnDragStop", function(self)
+        if not self._isDragging then return end
+        self._isDragging = false
+        self._wasDragged = true
+        self:StopMovingOrSizing()
+        local db = getDbFn()
+        if opts.onSavePos and db then
+            opts.onSavePos(self, db)
+        end
+    end)
+
+    frame:SetScript("OnMouseUp", function(self, button)
+        local wasDragged = self._wasDragged
+        self._wasDragged = false
+        local db = getDbFn()
+
+        if button == "RightButton" and IsShiftKeyDown() then
+            if db then
+                db[lockKey] = not db[lockKey]
+                local isLocked = db[lockKey]
+                local tag = opts.moduleTag or "[EFHelper]"
+                local lockLabel = propagateLocked and "|cffff5555Locked (click-through)|r" or "|cffff5555Locked|r"
+                print(string.format("|cff0cd29f%s|r Frame is now %s.", tag, isLocked and lockLabel or "|cff55ff55Unlocked|r"))
+                if opts.onLockChanged then
+                    opts.onLockChanged(self, isLocked, db)
+                end
+            end
+        elseif not wasDragged then
+            if button == "RightButton" and not IsLocked() and opts.onRightClickUnlocked then
+                opts.onRightClickUnlocked(self, db)
+            elseif opts.onMouseUp then
+                opts.onMouseUp(self, button, db)
+            end
+        end
+
+        if propagateLocked and self.SetPropagateMouseClicks then
+            self:SetPropagateMouseClicks(false)
+        end
+    end)
+end
+
 -- Backward compatibility aliases
 EFHelper.GetFont = UI.GetFont
 EFHelper.SetupFontString = UI.SetupFontString
@@ -264,15 +365,31 @@ function EFHelper:OnInitialize()
     -- Initialize AceDB-3.0
     self.db = LibStub("AceDB-3.0"):New("EFHelperDB", dbDefaults, true)
 
-    -- Support legacy character DB bridge
-    EFHelperCharDB = EFHelperCharDB or {}
+    -- One-time migration from legacy EFHelperCharDB into AceDB char/profile
+    if type(_G.EFHelperCharDB) == "table" and not self.db.char._migratedFromLegacy then
+        local legacy = _G.EFHelperCharDB
+        if legacy.lastSpell then self.db.char.lastSpell = legacy.lastSpell end
+        if legacy.lastMobName then self.db.char.lastMobName = legacy.lastMobName end
+        if legacy.campfirePoint and not self.db.profile.Campfire.pos then
+            self.db.profile.Campfire.pos = legacy.campfirePoint
+        end
+        if legacy.xpBarPoint and not self.db.profile.XPBar.pos then
+            self.db.profile.XPBar.pos = legacy.xpBarPoint
+        end
+        if type(legacy.XPBar) == "table" then
+            self.db.char.XPBar = self.db.char.XPBar or {}
+            for k, v in pairs(legacy.XPBar) do
+                if self.db.char.XPBar[k] == nil or self.db.char.XPBar[k] == 0 or self.db.char.XPBar[k] == false then
+                    self.db.char.XPBar[k] = v
+                end
+            end
+        end
+        self.db.char._migratedFromLegacy = true
+    end
 
-    -- Sync character overrides if present
-    if EFHelperCharDB.lastSpell then self.db.profile.lastSpell = EFHelperCharDB.lastSpell end
-    if EFHelperCharDB.currentProfile then self.db.profile.currentProfile = EFHelperCharDB.currentProfile end
-    if EFHelperCharDB.lastMobName then self.db.profile.lastMobName = EFHelperCharDB.lastMobName end
-    if EFHelperCharDB.activeRouteIndex then self.db.profile.activeRouteIndex = EFHelperCharDB.activeRouteIndex end
-    if EFHelperCharDB.hudShown ~= nil then self.db.profile.hudShown = EFHelperCharDB.hudShown end
+    -- Sync per-character tagging overrides into active profile on login
+    if self.db.char.lastSpell then self.db.profile.lastSpell = self.db.char.lastSpell end
+    if self.db.char.lastMobName then self.db.profile.lastMobName = self.db.char.lastMobName end
 end
 
 function EFHelper:OnEnable()
@@ -322,10 +439,7 @@ function EFHelper:GetOrCreateFFAAutoLootButton()
     local btn = UI.CreateBackdropFrame("Button", "EFHelperFFAAutoLootButton", UIParent, 124, 22)
     btn:SetFrameStrata("MEDIUM")
     btn:SetClampedToScreen(true)
-    btn:SetMovable(true)
-    btn:EnableMouse(true)
-    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    btn:RegisterForDrag("LeftButton")
+    btn:RegisterForClicks("LeftButtonUp")
 
     local pos = self.db and self.db.profile and self.db.profile.ffaAutoLootPos
     if pos and pos.point then
@@ -356,37 +470,22 @@ function EFHelper:GetOrCreateFFAAutoLootButton()
     label:SetJustifyH("LEFT")
     btn.label = label
 
-    btn:SetScript("OnDragStart", function(f)
-        if self.db and self.db.profile and self.db.profile.ffaAutoLootLocked then
-            return
-        end
-        f.isDragging = true
-        f:StartMoving()
-    end)
-    btn:SetScript("OnDragStop", function(f)
-        if not f.isDragging then return end
-        f.isDragging = false
-        f:StopMovingOrSizing()
-        local point, _, relPoint, x, y = f:GetPoint()
-        if self.db and self.db.profile then
-            self.db.profile.ffaAutoLootPos = {
+    UI.MakeMovable(btn, function() return self.db and self.db.profile end, {
+        moduleTag = "[EFHelper FFA Loot]",
+        lockKey = "ffaAutoLootLocked",
+        propagateClicksWhenLocked = false,
+        onSavePos = function(f, prof)
+            local point, _, relPoint, x, y = f:GetPoint()
+            prof.ffaAutoLootPos = {
                 point = point,
                 relPoint = relPoint,
                 x = math.floor((x or 0) + 0.5),
                 y = math.floor((y or 0) + 0.5),
             }
-        end
-    end)
+        end,
+    })
 
     btn:SetScript("OnClick", function(_, button)
-        if button == "RightButton" and IsShiftKeyDown() then
-            if self.db and self.db.profile then
-                self.db.profile.ffaAutoLootLocked = not self.db.profile.ffaAutoLootLocked
-                local isLocked = self.db.profile.ffaAutoLootLocked
-                print(string.format("|cff0cd29f[EFHelper FFA Loot]|r Frame is now %s.", isLocked and "|cffff5555Locked|r" or "|cff55ff55Unlocked|r"))
-            end
-            return
-        end
         if button == "LeftButton" then
             local newState = not IsAutoLootEnabled()
             SetAutoLootEnabled(newState)

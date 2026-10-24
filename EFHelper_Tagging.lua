@@ -44,16 +44,21 @@ EFHelper.TaggingSpells = Tagging.Spells
 -- @param mobName string: Name of the mob to target
 -- @param spellName string|nil: Name of the spell/ability to cast
 -- @param perCharacter boolean: Whether to save as per-character macro
+-- @param silent boolean|nil: If true, suppresses non-error chat output
 -- @return boolean: success
-function Tagging:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCharacter)
+function Tagging:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCharacter, silent)
     if InCombatLockdown and InCombatLockdown() then
-        print("|cffff4444[EFHelper]|r Cannot create or edit macros while in combat!")
+        if not silent then
+            print("|cffff4444[EFHelper]|r Cannot create or edit macros while in combat!")
+        end
         return false
     end
 
     mobName = Utils.Trim(mobName)
     if mobName == "" then
-        print("|cffff4444[EFHelper]|r Please enter a mob name.")
+        if not silent then
+            print("|cffff4444[EFHelper]|r Please enter a mob name.")
+        end
         return false
     end
 
@@ -81,7 +86,9 @@ function Tagging:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCh
 
     local body = table.concat(bodyLines, "\n")
     if #body > 255 then
-        print("|cffff4444[EFHelper]|r Macro text exceeds 255 character limit.")
+        if not silent then
+            print("|cffff4444[EFHelper]|r Macro text exceeds 255 character limit.")
+        end
         return false
     end
 
@@ -100,33 +107,37 @@ function Tagging:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCh
     local existingIndex = GetMacroIndexByName(macroName)
     if existingIndex > 0 then
         EditMacro(existingIndex, macroName, iconFileID, body)
-        print(string.format("|cff0cd29f[EFHelper]|r Updated macro '|cffffd100%s|r' for '|cffffd100%s|r'%s.",
-            macroName, mobName, (not isNone) and (" with '|cffffd100" .. spellName .. "|r'") or " (target & ping only)"))
+        if not silent then
+            print(string.format("|cff0cd29f[EFHelper]|r Updated macro '|cffffd100%s|r' for '|cffffd100%s|r'%s.",
+                macroName, mobName, (not isNone) and (" with '|cffffd100" .. spellName .. "|r'") or " (target & ping only)"))
+        end
     else
         local isPerChar = (perCharacter ~= false) and 1 or nil
         local newIndex = CreateMacro(macroName, iconFileID, body, isPerChar)
         if not newIndex or newIndex == 0 then
-            print("|cffff4444[EFHelper]|r Failed to create macro. Macro limit may be reached.")
+            if not silent then
+                print("|cffff4444[EFHelper]|r Failed to create macro. Macro limit may be reached.")
+            end
             return false
         end
-        print(string.format("|cff0cd29f[EFHelper]|r Created macro '|cffffd100%s|r' for '|cffffd100%s|r'%s.",
-            macroName, mobName, (not isNone) and (" with '|cffffd100" .. spellName .. "|r'") or " (target & ping only)"))
+        if not silent then
+            print(string.format("|cff0cd29f[EFHelper]|r Created macro '|cffffd100%s|r' for '|cffffd100%s|r'%s.",
+                macroName, mobName, (not isNone) and (" with '|cffffd100" .. spellName .. "|r'") or " (target & ping only)"))
+        end
     end
 
     EFHelper.activeRouteMob = mobName
-    if EFHelper.db and EFHelper.db.profile then
-        EFHelper.db.profile.lastMobName = mobName
-    end
-    if EFHelperCharDB then
-        EFHelperCharDB.lastMobName = mobName
+    if EFHelper.db then
+        if EFHelper.db.profile then EFHelper.db.profile.lastMobName = mobName end
+        if EFHelper.db.char then EFHelper.db.char.lastMobName = mobName end
     end
 
     return true
 end
 
 -- Compatibility bridge
-function EFHelper:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCharacter)
-    return Tagging:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCharacter)
+function EFHelper:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCharacter, silent)
+    return Tagging:CreateOrUpdateTaggingMacro(macroName, mobName, spellName, perCharacter, silent)
 end
 
 -- ----------------------------------------------------------------------------
@@ -152,13 +163,15 @@ SlashCmdList["EFHELPERQUICK"] = function(msg)
     local success = Tagging:CreateOrUpdateTaggingMacro(Tagging.defaultMacroName, targetName, ability, true)
     if success then
         EFHelper.selectedSpell = ability
-        if EFHelper.db and EFHelper.db.profile then
-            EFHelper.db.profile.lastMobName = targetName
-            EFHelper.db.profile.lastSpell = ability
-        end
-        if EFHelperCharDB then
-            EFHelperCharDB.lastMobName = targetName
-            EFHelperCharDB.lastSpell = ability
+        if EFHelper.db then
+            if EFHelper.db.profile then
+                EFHelper.db.profile.lastMobName = targetName
+                EFHelper.db.profile.lastSpell = ability
+            end
+            if EFHelper.db.char then
+                EFHelper.db.char.lastMobName = targetName
+                EFHelper.db.char.lastSpell = ability
+            end
         end
         if EFHelper.Config and EFHelper.Config.frame then
             local f = EFHelper.Config.frame
@@ -209,7 +222,8 @@ local function HookRXPButton(btn)
             if not tName or tName == "" then return end
 
             local spell = (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.lastSpell) or EFHelper.selectedSpell
-            Tagging:CreateOrUpdateTaggingMacro(Tagging.rxpMacroName, tName, spell, true)
+            local silent = not (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.silentTagClicks == false)
+            Tagging:CreateOrUpdateTaggingMacro(Tagging.rxpMacroName, tName, spell, true, silent)
         end)
     end
 end

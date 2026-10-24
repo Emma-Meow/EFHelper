@@ -40,8 +40,23 @@ function XPBar:GetDB()
 end
 
 function XPBar:GetCharDB()
-    EFHelperCharDB = EFHelperCharDB or {}
-    EFHelperCharDB.XPBar = EFHelperCharDB.XPBar or {
+    if EFHelper.db and EFHelper.db.char then
+        EFHelper.db.char.XPBar = EFHelper.db.char.XPBar or {
+            sessionStartTime = nil,
+            sessionStartXP = nil,
+            sessionGainedXP = 0,
+            lastHeartbeat = nil,
+            levelBasePlayed = nil,
+            levelDingSessionSec = 0,
+            isManuallyPaused = false,
+            manualPauseStart = nil,
+            neglectedSec = 0,
+            lastXPTime = nil,
+            isAutoPaused = false,
+        }
+        return EFHelper.db.char.XPBar
+    end
+    self._fallbackCharDB = self._fallbackCharDB or {
         sessionStartTime = nil,
         sessionStartXP = nil,
         sessionGainedXP = 0,
@@ -54,7 +69,7 @@ function XPBar:GetCharDB()
         lastXPTime = nil,
         isAutoPaused = false,
     }
-    return EFHelperCharDB.XPBar
+    return self._fallbackCharDB
 end
 
 function XPBar:IsEnabled()
@@ -467,9 +482,6 @@ function XPBar:SavePosition(frame)
         local p = { point, "UIParent", relPoint, math.floor(x + 0.5), math.floor(y + 0.5) }
         local db = self:GetDB()
         db.pos = p
-        if EFHelperCharDB then
-            EFHelperCharDB.xpBarPoint = p
-        end
     end
 end
 
@@ -477,7 +489,7 @@ function XPBar:RestorePosition(frame)
     local f = frame or barFrame
     if not f then return end
     local db = self:GetDB()
-    local p = db.pos or (EFHelperCharDB and EFHelperCharDB.xpBarPoint)
+    local p = db.pos
     f:ClearAllPoints()
     if p and type(p) == "table" and p[1] and p[3] and p[4] and p[5] then
         f:SetPoint(p[1], UIParent, p[3], p[4], p[5])
@@ -495,9 +507,6 @@ function XPBar:GetOrCreateBarFrame()
     f:SetSize(db.width or 480, db.height or 18)
     f:SetFrameStrata("MEDIUM")
     f:SetClampedToScreen(true)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
     f:SetScale(db.scale or 1.0)
     XPBar:RestorePosition(f)
 
@@ -511,17 +520,28 @@ function XPBar:GetOrCreateBarFrame()
     f:SetBackdropColor(0.04, 0.08, 0.14, 0.95)
     f:SetBackdropBorderColor(0.0, 0.0, 0.0, 1.0)
 
-    -- Drag Handlers
-    f:SetScript("OnDragStart", function(self)
-        local cfg = XPBar:GetDB()
-        if not cfg.locked then
-            self:StartMoving()
-        end
-    end)
-    f:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        XPBar:SavePosition(self)
-    end)
+    if UI and UI.MakeMovable then
+        UI.MakeMovable(f, function() return XPBar:GetDB() end, {
+            moduleTag = "[EFHelper XPBar]",
+            propagateClicksWhenLocked = false,
+            onSavePos = function(frame)
+                XPBar:SavePosition(frame)
+            end,
+            onLockChanged = function(frame)
+                if frame:IsMouseOver() and frame:GetScript("OnEnter") then
+                    frame:GetScript("OnEnter")(frame)
+                end
+            end,
+            onMouseUp = function(frame, button)
+                if button == "LeftButton" and IsShiftKeyDown() then
+                    XPBar:TogglePause()
+                    if frame:IsMouseOver() and frame:GetScript("OnEnter") then
+                        frame:GetScript("OnEnter")(frame)
+                    end
+                end
+            end,
+        })
+    end
 
     -- Status Bar 1: Completed Quests Bar (Orange / Amber #f59e0b)
     -- Extends from 0 to (currentXP + completedQuestXP)
@@ -675,24 +695,6 @@ function XPBar:GetOrCreateBarFrame()
 
     f:SetScript("OnLeave", function(self)
         GameTooltip:Hide()
-    end)
-
-    f:SetScript("OnMouseUp", function(self, button)
-        if button == "RightButton" and IsShiftKeyDown() then
-            local cfg = XPBar:GetDB()
-            cfg.locked = not cfg.locked
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[EFHelper XPBar]|r Frame is now %s.", cfg.locked and "|cffff5555Locked|r" or "|cff55ff55Unlocked|r"))
-            if self:IsMouseOver() then
-                self:GetScript("OnEnter")(self)
-            end
-            return
-        end
-        if button == "LeftButton" and IsShiftKeyDown() then
-            XPBar:TogglePause()
-            if self:IsMouseOver() then
-                self:GetScript("OnEnter")(self)
-            end
-        end
     end)
 
     barFrame = f

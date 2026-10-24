@@ -512,46 +512,18 @@ function XP:GetOrCreateHUD()
     f:SetPoint("CENTER", UIParent, "CENTER", db.posX or 0, db.posY or 130)
     f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
 
-    f:SetScript("OnMouseDown", function(self, button)
-        local curDb = XP:GetDB()
-        local isLocked = (curDb.locked == true) and not XP.isTestMode
-        if isLocked and not (button == "RightButton" and IsShiftKeyDown()) then
-            if self.SetPropagateMouseClicks then
-                self:SetPropagateMouseClicks(true)
-            end
-        else
-            if self.SetPropagateMouseClicks then
-                self:SetPropagateMouseClicks(false)
-            end
-        end
-    end)
-
-    f:SetScript("OnDragStart", function(self)
-        local curDb = XP:GetDB()
-        if curDb.locked and not XP.isTestMode then return end
-        self:StartMoving()
-    end)
-    f:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local _, _, _, x, y = self:GetPoint()
-        db.posX = math.floor(x or 0)
-        db.posY = math.floor(y or 0)
-    end)
-    f:SetScript("OnMouseUp", function(self, button)
-        if button == "RightButton" and IsShiftKeyDown() then
-            local curDb = XP:GetDB()
-            curDb.locked = not curDb.locked
-            print(string.format("|cff00ccff[EFHelper XP]|r Frame is now %s.", curDb.locked and "|cffff5555Locked|r" or "|cff55ff55Unlocked|r"))
-            XP:ApplyLockState()
-        end
-        if self.SetPropagateMouseClicks then
-            self:SetPropagateMouseClicks(false)
-        end
-    end)
+    if UI and UI.MakeMovable then
+        UI.MakeMovable(f, function() return XP:GetDB() end, {
+            moduleTag = "[EFHelper XP]",
+            isTestModeFn = function() return XP.isTestMode end,
+            onSavePos = function(frame, curDb)
+                local _, _, _, x, y = frame:GetPoint()
+                curDb.posX = math.floor(x or 0)
+                curDb.posY = math.floor(y or 0)
+            end,
+        })
+    end
 
     local text = f.text or f:CreateFontString(nil, "ARTWORK", "GameFontNormalHuge")
     text:SetJustifyH("CENTER")
@@ -570,11 +542,6 @@ function XP:GetOrCreateHUD()
     xpHudFrame = f
     XP.hud = f
     return f
-end
-
-function XP:ApplyLockState()
-    if not xpHudFrame then return end
-    xpHudFrame:EnableMouse(true)
 end
 
 function XP:ApplyFontSettings()

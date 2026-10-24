@@ -234,48 +234,21 @@ function Swapper:GetOrCreateHUD()
     local db = Swapper:GetDB()
     local f = UI.CreateBackdropFrame("Frame", "EFHelperSwapperHUD", UIParent, 140, 36)
     f:SetPoint("CENTER", UIParent, "CENTER", db.hudX or 0, db.hudY or -180)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
     f:SetClampedToScreen(true)
 
-    f:SetScript("OnMouseDown", function(self, button)
-        local curDb = Swapper:GetDB()
-        if curDb.locked and not (button == "RightButton" and IsShiftKeyDown()) then
-            if self.SetPropagateMouseClicks then
-                self:SetPropagateMouseClicks(true)
-            end
-        else
-            if self.SetPropagateMouseClicks then
-                self:SetPropagateMouseClicks(false)
-            end
-        end
-    end)
-
-    f:SetScript("OnDragStart", function(self)
-        local curDb = Swapper:GetDB()
-        if curDb.locked then return end
-        self:StartMoving()
-    end)
-    f:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local _, _, _, x, y = self:GetPoint()
-        db.hudX = math.floor(x or 0)
-        db.hudY = math.floor(y or 0)
-    end)
-    f:SetScript("OnMouseUp", function(self, button)
-        local curDb = Swapper:GetDB()
-        if button == "RightButton" and IsShiftKeyDown() then
-            curDb.locked = not curDb.locked
-            print(string.format("|cff0cd29f[EFHelper Swapper]|r Selection HUD is now %s.", curDb.locked and "|cffff5555Locked (click-through)|r" or "|cff55ff55Unlocked|r"))
-            Swapper:ApplyLockState()
-        elseif button == "RightButton" and not curDb.locked then
-            Swapper:ClearSlots()
-        end
-        if self.SetPropagateMouseClicks then
-            self:SetPropagateMouseClicks(false)
-        end
-    end)
+    if UI and UI.MakeMovable then
+        UI.MakeMovable(f, function() return Swapper:GetDB() end, {
+            moduleTag = "[EFHelper Swapper]",
+            onSavePos = function(frame, curDb)
+                local _, _, _, x, y = frame:GetPoint()
+                curDb.hudX = math.floor(x or 0)
+                curDb.hudY = math.floor(y or 0)
+            end,
+            onRightClickUnlocked = function()
+                Swapper:ClearSlots()
+            end,
+        })
+    end
 
     local line1 = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     line1:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -4)
@@ -294,11 +267,6 @@ function Swapper:GetOrCreateHUD()
     return f
 end
 
-function Swapper:ApplyLockState()
-    if not hudFrame then return end
-    hudFrame:EnableMouse(true)
-end
-
 function Swapper:UpdateHUD()
     local db = Swapper:GetDB()
     if not db.showHUD then
@@ -307,7 +275,6 @@ function Swapper:UpdateHUD()
     end
 
     local hud = Swapper:GetOrCreateHUD()
-    Swapper:ApplyLockState()
     hud:Show()
 
     local s1 = Swapper.state.slot1
@@ -352,7 +319,6 @@ SlashCmdList["EFSWAP"] = function(msg)
         local db = Swapper:GetDB()
         db.locked = not db.locked
         print(string.format("|cff0cd29f[EFHelper Swapper]|r Selection HUD is now %s.", db.locked and "|cffff5555Locked (click-through)|r" or "|cff55ff55Unlocked|r"))
-        Swapper:ApplyLockState()
     elseif cmd:find("^dummy") then
         local dummyArg = raw:match("^%S+%s+(.+)$")
         if dummyArg and dummyArg ~= "" then

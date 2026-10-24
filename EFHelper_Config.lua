@@ -227,6 +227,60 @@ local function CreateSectionTitle(parent, text, relativeTo, yOffset)
     return title
 end
 
+-- Helper to create standardized checkboxes with automatic DB binding, auto-stacking & OnRefresh sync
+local _cbSeq = 0
+local function AddCheckbox(parent, opts)
+    local template = opts.template or "InterfaceOptionsCheckButtonTemplate"
+    _cbSeq = _cbSeq + 1
+    local name = opts.name or (parent:GetName() and (parent:GetName() .. "_" .. (opts.key or "Cb"))) or ("EFHelper_AutoCb_" .. _cbSeq)
+    local cb = CreateFrame("CheckButton", name, parent, template)
+
+    local rel = opts.relativeTo or parent._lastCb or parent
+    local isFontString = rel and rel.IsObjectType and rel:IsObjectType("FontString")
+    local defaultY = (rel == parent or isFontString) and -8 or (parent._cbSpacing or -2)
+    local relPoint = (rel == parent) and (opts.relPoint or "TOPLEFT") or (opts.relPoint or "BOTTOMLEFT")
+    cb:SetPoint("TOPLEFT", rel, relPoint, opts.x or 0, opts.y or defaultY)
+    parent._lastCb = cb
+
+    local txt = cb.Text or (cb:GetName() and _G[cb:GetName() .. "Text"])
+    if txt then txt:SetText(opts.label or "") end
+
+    local getDB = opts.getDB or parent._getDB
+    local function GetCheckedValue()
+        local db = getDB and getDB()
+        if opts.get then return opts.get(db) and true or false end
+        if not db or not opts.key then return false end
+        return opts.default == false and (db[opts.key] == true) or (db[opts.key] ~= false)
+    end
+
+    cb:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        local db = getDB and getDB()
+        if opts.set then
+            opts.set(checked, db, self)
+        elseif db and opts.key then
+            db[opts.key] = checked
+        end
+        if opts.onChange then opts.onChange(checked, db, self) end
+        if opts.onClick then opts.onClick(self, checked, db) end
+    end)
+
+    parent._checkboxes = parent._checkboxes or {}
+    table.insert(parent._checkboxes, {
+        cb = cb,
+        refresh = function() cb:SetChecked(GetCheckedValue()) end,
+    })
+
+    return cb
+end
+
+local function RefreshCheckboxes(panel)
+    if not panel or not panel._checkboxes then return end
+    for _, entry in ipairs(panel._checkboxes) do
+        entry.refresh()
+    end
+end
+
 -- ----------------------------------------------------------------------------
 -- Panel 1: Tagging & Macros
 -- ----------------------------------------------------------------------------
@@ -307,11 +361,9 @@ local function CreateTaggingPanel(parent)
         end,
         function(val, text)
             EFHelper.selectedSpell = val
-            if EFHelper.db and EFHelper.db.profile then
-                EFHelper.db.profile.lastSpell = val
-            end
-            if EFHelperCharDB then
-                EFHelperCharDB.lastSpell = val
+            if EFHelper.db then
+                if EFHelper.db.profile then EFHelper.db.profile.lastSpell = val end
+                if EFHelper.db.char then EFHelper.db.char.lastSpell = val end
             end
         end,
         spellOptions
@@ -380,13 +432,15 @@ local function CreateTaggingPanel(parent)
         end
 
         if success then
-            if EFHelper.db and EFHelper.db.profile then
-                EFHelper.db.profile.lastMobName = mobName
-                EFHelper.db.profile.lastSpell = currentSpell
-            end
-            if EFHelperCharDB then
-                EFHelperCharDB.lastMobName = mobName
-                EFHelperCharDB.lastSpell = currentSpell
+            if EFHelper.db then
+                if EFHelper.db.profile then
+                    EFHelper.db.profile.lastMobName = mobName
+                    EFHelper.db.profile.lastSpell = currentSpell
+                end
+                if EFHelper.db.char then
+                    EFHelper.db.char.lastMobName = mobName
+                    EFHelper.db.char.lastSpell = currentSpell
+                end
             end
             feedback:SetText(string.format("|cff00ff00Macro '%s' saved! Drag from /m to bar.|r", selectedMacroName or "EFTag"))
         else
@@ -400,22 +454,31 @@ local function CreateTaggingPanel(parent)
     hint:SetText("Saves to Character Macros (/m). Drag the macro to your action bar.")
 
     -- 4b. Lightweight FFA Auto-Loot Toggle Setting
-    local ffaCb = CreateFrame("CheckButton", "EFHelperConfigFFAAutoLoot", p, "InterfaceOptionsCheckButtonTemplate")
-    ffaCb:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", -2, -6)
-    _G[ffaCb:GetName() .. "Text"]:SetText("Show Auto-Loot Toggle Button while in Free-For-All Group")
-    ffaCb:SetScript("OnClick", function(self)
-        if EFHelper.db and EFHelper.db.profile then
-            EFHelper.db.profile.ffaAutoLootEnabled = self:GetChecked() and true or false
-        end
-        if EFHelper.UpdateFFAAutoLootWidget then
-            EFHelper:UpdateFFAAutoLootWidget()
-        end
-    end)
+    p._getDB = function() return EFHelper.db and EFHelper.db.profile end
+    local ffaCb = AddCheckbox(p, {
+        name = "EFHelperConfigFFAAutoLoot",
+        label = "Show Auto-Loot Toggle Button while in Free-For-All Group",
+        relativeTo = hint,
+        x = -2,
+        y = -6,
+        key = "ffaAutoLootEnabled",
+        onChange = function()
+            if EFHelper.UpdateFFAAutoLootWidget then EFHelper:UpdateFFAAutoLootWidget() end
+        end,
+    })
     p.ffaCb = ffaCb
+
+    -- 4c. Silent RXP Button Target Updates
+    local silentCb = AddCheckbox(p, {
+        name = "EFHelperConfigSilentTagClicks",
+        label = "Silent Macro Updates on RXP Target Button Clicks",
+        key = "silentTagClicks",
+    })
+    p.silentCb = silentCb
 
     -- 5. Information Box
     local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", ffaCb, "BOTTOMLEFT", 2, -6)
+    infoBox:SetPoint("TOPLEFT", silentCb, "BOTTOMLEFT", 2, -6)
     infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
     infoBox:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -445,17 +508,14 @@ local function CreateTaggingPanel(parent)
     p.feedback = feedback
 
     p.OnRefresh = function(self)
-        local lastMob = (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.lastMobName) or (EFHelperCharDB and EFHelperCharDB.lastMobName)
+        RefreshCheckboxes(self)
+        local lastMob = (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.lastMobName) or (EFHelper.db and EFHelper.db.char and EFHelper.db.char.lastMobName)
         if lastMob and self.mobInput:GetText() == "" then
             self.mobInput:SetText(lastMob)
         end
         local lastSpell = (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.lastSpell) or EFHelper.selectedSpell
         if lastSpell then
             self.spellDropdown:SetText(lastSpell)
-        end
-        if self.ffaCb then
-            local enabled = not (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.ffaAutoLootEnabled == false)
-            self.ffaCb:SetChecked(enabled)
         end
         self.feedback:SetText("")
     end
@@ -484,21 +544,19 @@ local function CreateCampfirePanel(parent)
     desc:SetText("Shows active campfire benefits in equivalent WoW buffs below the Minimap, and alerts when near a tent.")
 
     -- 1. Enable Checkbox
-    local enableCb = CreateFrame("CheckButton", "EFHelperConfigCampfireEnable", p, "InterfaceOptionsCheckButtonTemplate")
-    enableCb:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
-    _G[enableCb:GetName() .. "Text"]:SetText("Enable Campfire HUD & Tent Alerts Module")
-    enableCb:SetScript("OnClick", function(self)
-        if Campfire then
-            local db = Campfire:GetDB()
-            db.enabled = self:GetChecked()
-            if db.enabled then
-                Campfire:Enable()
-            else
-                Campfire:Disable()
+    p._getDB = function() return Campfire and Campfire:GetDB() end
+    local enableCb = AddCheckbox(p, {
+        name = "EFHelperConfigCampfireEnable",
+        label = "Enable Campfire HUD & Tent Alerts Module",
+        relativeTo = desc,
+        key = "enabled",
+        onChange = function(checked)
+            if Campfire then
+                if checked then Campfire:Enable() else Campfire:Disable() end
+                p:OnRefresh()
             end
-            p:OnRefresh()
-        end
-    end)
+        end,
+    })
     p.enableCb = enableCb
 
     -- Status Box
@@ -623,10 +681,7 @@ local function CreateCampfirePanel(parent)
 
         local db = Campfire:GetDB()
         local isEnabled = (db.enabled ~= false)
-
-        if self.enableCb then
-            self.enableCb:SetChecked(isEnabled)
-        end
+        RefreshCheckboxes(self)
 
         if not isEnabled then
             self.statusText:SetText("|cffff4444Campfire & Tent Alerts Module is Disabled.|r\nCheck the box above to enable campfire HUD and proximity tent alerts.")
@@ -811,103 +866,63 @@ local function CreateXPPanel(parent)
     desc:SetJustifyH("LEFT")
     desc:SetText("Calculates predicted kill experience for targeted hostile mobs based on classic ZD formulas, 2–5 player party scaling, and dungeon modifiers.")
 
-    -- 1. Enable Checkbox
-    local enableCb = CreateFrame("CheckButton", "EFHelperConfigXPEnable", p, "InterfaceOptionsCheckButtonTemplate")
-    enableCb:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
-    _G[enableCb:GetName() .. "Text"]:SetText("Enable Kill XP HUD")
-    enableCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.enabled = self:GetChecked()
-            XP:UpdateActiveState()
-            XP:UpdateHUD()
-        end
-    end)
+    p._getDB = function() return XP and XP:GetDB() end
 
-    -- 2. Show XP Percentage Checkbox
-    local pctCb = CreateFrame("CheckButton", "EFHelperConfigXPPct", p, "InterfaceOptionsCheckButtonTemplate")
-    pctCb:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -2)
-    _G[pctCb:GetName() .. "Text"]:SetText("Show XP Percentage relative to level (e.g. 1.5%)")
-    pctCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.showPercentage = self:GetChecked()
-            XP:UpdateHUD()
-        end
-    end)
-
-    -- 3. Rested XP Potential Checkbox
-    local restedCb = CreateFrame("CheckButton", "EFHelperConfigXPRested", p, "InterfaceOptionsCheckButtonTemplate")
-    restedCb:SetPoint("TOPLEFT", pctCb, "BOTTOMLEFT", 0, -2)
-    _G[restedCb:GetName() .. "Text"]:SetText("Show Rested XP Bonus in Display (+X Rested)")
-    restedCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.showRested = self:GetChecked()
-            XP:UpdateHUD()
-        end
-    end)
-
-    -- 4. Show Mob & Group Info Tags Checkbox
-    local mobInfoCb = CreateFrame("CheckButton", "EFHelperConfigXPMobInfo", p, "InterfaceOptionsCheckButtonTemplate")
-    mobInfoCb:SetPoint("TOPLEFT", restedCb, "BOTTOMLEFT", 0, -2)
-    _G[mobInfoCb:GetName() .. "Text"]:SetText("Show Mob & Group Tags (e.g. [Party 2], [Dungeon 0.4x], [Elite])")
-    mobInfoCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.showMobInfo = self:GetChecked()
-            XP:UpdateHUD()
-        end
-    end)
-
-    -- 5. Show XP Efficiency & Expected HP Checkbox
-    local effCb = CreateFrame("CheckButton", "EFHelperConfigXPEff", p, "InterfaceOptionsCheckButtonTemplate")
-    effCb:SetPoint("TOPLEFT", mobInfoCb, "BOTTOMLEFT", 0, -2)
-    _G[effCb:GetName() .. "Text"]:SetText("Show XP Efficiency & Expected Mob HP (2nd line: Eff & Actual / Expected HP)")
-    effCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.showEfficiency = self:GetChecked()
-            XP:UpdateHUD()
-        end
-    end)
-
-    -- 6. Show 0 XP Gray Warning Checkbox
-    local zeroXpCb = CreateFrame("CheckButton", "EFHelperConfigXPZero", p, "InterfaceOptionsCheckButtonTemplate")
-    zeroXpCb:SetPoint("TOPLEFT", effCb, "BOTTOMLEFT", 0, -2)
-    _G[zeroXpCb:GetName() .. "Text"]:SetText("Show '0 XP (Trivial / Gray)' warning on trivial mobs")
-    zeroXpCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.showZeroXp = self:GetChecked()
-            XP:UpdateHUD()
-        end
-    end)
-
-    -- 7. Print Kill Feedback in Chat Checkbox
-    local feedbackCb = CreateFrame("CheckButton", "EFHelperConfigXPFeedback", p, "InterfaceOptionsCheckButtonTemplate")
-    feedbackCb:SetPoint("TOPLEFT", zeroXpCb, "BOTTOMLEFT", 0, -2)
-    _G[feedbackCb:GetName() .. "Text"]:SetText("Print Kill Feedback in Chat (Diagnostic verification upon mob death)")
-    feedbackCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.showFeedback = self:GetChecked()
-        end
-    end)
-
-    -- 8. Party Group XP Predictor Checkbox (2-5 Players)
-    local groupCb = CreateFrame("CheckButton", "EFHelperConfigXPGroup", p, "InterfaceOptionsCheckButtonTemplate")
-    groupCb:SetPoint("TOPLEFT", feedbackCb, "BOTTOMLEFT", 0, -2)
-    _G[groupCb:GetName() .. "Text"]:SetText("|cffffd100[Party]|r Enable Party Group XP Predictor (2–5 Players)")
-    groupCb:SetScript("OnClick", function(self)
-        if XP then
-            local db = XP:GetDB()
-            db.groupPredictor = self:GetChecked()
-            db.experimentalDuo = db.groupPredictor
-            XP:UpdateActiveState()
-            XP:UpdateHUD()
-        end
-    end)
+    -- 1-8. Checkboxes (Auto-stacked)
+    local enableCb = AddCheckbox(p, {
+        name = "EFHelperConfigXPEnable",
+        label = "Enable Kill XP HUD",
+        relativeTo = desc,
+        key = "enabled",
+        onClick = function()
+            if XP then XP:UpdateActiveState(); XP:UpdateHUD() end
+        end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPPct",
+        label = "Show XP Percentage relative to level (e.g. 1.5%)",
+        key = "showPercentage",
+        onClick = function() if XP then XP:UpdateHUD() end end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPRested",
+        label = "Show Rested XP Bonus in Display (+X Rested)",
+        key = "showRested",
+        onClick = function() if XP then XP:UpdateHUD() end end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPMobInfo",
+        label = "Show Mob & Group Tags (e.g. [Party 2], [Dungeon 0.4x], [Elite])",
+        key = "showMobInfo",
+        default = false,
+        onClick = function() if XP then XP:UpdateHUD() end end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPEff",
+        label = "Show XP Efficiency & Expected Mob HP (2nd line: Eff & Actual / Expected HP)",
+        key = "showEfficiency",
+        onClick = function() if XP then XP:UpdateHUD() end end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPZero",
+        label = "Show '0 XP (Trivial / Gray)' warning on trivial mobs",
+        key = "showZeroXp",
+        onClick = function() if XP then XP:UpdateHUD() end end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPFeedback",
+        label = "Print Kill Feedback in Chat (Diagnostic verification upon mob death)",
+        key = "showFeedback",
+    })
+    local groupCb = AddCheckbox(p, {
+        name = "EFHelperConfigXPGroup",
+        label = "|cffffd100[Party]|r Enable Party Group XP Predictor (2–5 Players)",
+        key = "groupPredictor",
+        onClick = function(_, checked, db)
+            if db then db.experimentalDuo = checked end
+            if XP then XP:UpdateActiveState(); XP:UpdateHUD() end
+        end,
+    })
 
     -- 9. Weighting Model Selector
     local modelBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
@@ -963,9 +978,6 @@ local function CreateXPPanel(parent)
     testBtn:SetScript("OnClick", function()
         if XP then
             XP.isTestMode = not XP.isTestMode
-            if XP.ApplyLockState then
-                XP:ApplyLockState()
-            end
             XP:UpdateHUD()
             testBtn:SetText(XP.isTestMode and "Stop Preview" or "Preview Display")
         end
@@ -1019,14 +1031,7 @@ local function CreateXPPanel(parent)
     p.OnRefresh = function(self)
         if XP then
             local db = XP:GetDB()
-            enableCb:SetChecked(db.enabled ~= false)
-            pctCb:SetChecked(db.showPercentage ~= false)
-            restedCb:SetChecked(db.showRested ~= false)
-            mobInfoCb:SetChecked(db.showMobInfo == true)
-            effCb:SetChecked(db.showEfficiency ~= false)
-            zeroXpCb:SetChecked(db.showZeroXp ~= false)
-            feedbackCb:SetChecked(db.showFeedback ~= false)
-            groupCb:SetChecked(db.groupPredictor ~= false)
+            RefreshCheckboxes(self)
             local isLaplace = (db.formulaModel == "laplace")
             modelBtn:SetText(isLaplace and "Model: Laplace (L+1)/(ΣL+n)" or "Model: Standard (L+2)/(ΣL+2n)")
             local logs = (XP and XP.GetLogs and XP:GetLogs()) or (EFHelperDB and EFHelperDB.XP and EFHelperDB.XP.testLogs) or {}
@@ -1059,68 +1064,49 @@ local function CreateXPBarPanel(parent)
     desc:SetJustifyH("LEFT")
     desc:SetText("High-information experience bar with completed quest XP overlay, dual clocks, and pace forecasting.")
 
-    -- 1. Enable Checkbox
-    local enableCb = CreateFrame("CheckButton", "EFHelperConfigXPBarEnable", p, "InterfaceOptionsCheckButtonTemplate")
-    enableCb:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
-    _G[enableCb:GetName() .. "Text"]:SetText("Enable Custom Experience Bar")
-    enableCb:SetScript("OnClick", function(self)
-        if XPBar then
-            local db = XPBar:GetDB()
-            db.enabled = self:GetChecked()
-            if db.enabled then
-                XPBar:Enable()
-            else
-                XPBar:Disable()
+    p._getDB = function() return XPBar and XPBar:GetDB() end
+    p._cbSpacing = -4
+
+    -- 1-5. Checkboxes (Auto-stacked)
+    local enableCb = AddCheckbox(p, {
+        name = "EFHelperConfigXPBarEnable",
+        label = "Enable Custom Experience Bar",
+        relativeTo = desc,
+        key = "enabled",
+        onClick = function(_, checked)
+            if XPBar then if checked then XPBar:Enable() else XPBar:Disable() end end
+        end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPBarLock",
+        label = "Lock Position (prevents dragging)",
+        key = "locked",
+        default = false,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPBarBlizz",
+        label = "Hide Default Blizzard XP Bar (StatusTrackingBarManager)",
+        key = "hideBlizzardBar",
+        default = false,
+        onClick = function() if XPBar then XPBar:UpdateBlizzardBarVisibility() end end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigXPBarRolling",
+        label = "Use Rolling Window for XP/Hour (uncheck for Total Session)",
+        get = function(db) return db and db.rateMode ~= "total" end,
+        set = function(checked, db) if db then db.rateMode = checked and "rolling" or "total" end end,
+        onClick = function()
+            if XPBar then
+                if p.OnRefresh then p.OnRefresh(p) end
+                XPBar:UpdateClockDisplay(true)
             end
-        end
-    end)
-
-    -- 2. Lock Position Checkbox
-    local lockCb = CreateFrame("CheckButton", "EFHelperConfigXPBarLock", p, "InterfaceOptionsCheckButtonTemplate")
-    lockCb:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -4)
-    _G[lockCb:GetName() .. "Text"]:SetText("Lock Position (prevents dragging)")
-    lockCb:SetScript("OnClick", function(self)
-        if XPBar then
-            local db = XPBar:GetDB()
-            db.locked = self:GetChecked()
-        end
-    end)
-
-    -- 3. Hide Blizzard Bar Checkbox
-    local blizzCb = CreateFrame("CheckButton", "EFHelperConfigXPBarBlizz", p, "InterfaceOptionsCheckButtonTemplate")
-    blizzCb:SetPoint("TOPLEFT", lockCb, "BOTTOMLEFT", 0, -4)
-    _G[blizzCb:GetName() .. "Text"]:SetText("Hide Default Blizzard XP Bar (StatusTrackingBarManager)")
-    blizzCb:SetScript("OnClick", function(self)
-        if XPBar then
-            local db = XPBar:GetDB()
-            db.hideBlizzardBar = self:GetChecked()
-            XPBar:UpdateBlizzardBarVisibility()
-        end
-    end)
-
-    -- 4. Rolling Window XP/Hour Checkbox
-    local rollingCb = CreateFrame("CheckButton", "EFHelperConfigXPBarRolling", p, "InterfaceOptionsCheckButtonTemplate")
-    rollingCb:SetPoint("TOPLEFT", blizzCb, "BOTTOMLEFT", 0, -4)
-    _G[rollingCb:GetName() .. "Text"]:SetText("Use Rolling Window for XP/Hour (uncheck for Total Session)")
-    rollingCb:SetScript("OnClick", function(self)
-        if XPBar then
-            local db = XPBar:GetDB()
-            db.rateMode = self:GetChecked() and "rolling" or "total"
-            if p.OnRefresh then p.OnRefresh(p) end
-            XPBar:UpdateClockDisplay(true)
-        end
-    end)
-
-    -- 5. Autopause Checkbox
-    local autoPauseCb = CreateFrame("CheckButton", "EFHelperConfigXPBarAutoPause", p, "InterfaceOptionsCheckButtonTemplate")
-    autoPauseCb:SetPoint("TOPLEFT", rollingCb, "BOTTOMLEFT", 0, -4)
-    _G[autoPauseCb:GetName() .. "Text"]:SetText("Auto-pause XP rate after 10m idle (neglects 6 of 10 minutes)")
-    autoPauseCb:SetScript("OnClick", function(self)
-        if XPBar then
-            local db = XPBar:GetDB()
-            db.autoPauseEnabled = self:GetChecked()
-        end
-    end)
+        end,
+    })
+    local autoPauseCb = AddCheckbox(p, {
+        name = "EFHelperConfigXPBarAutoPause",
+        label = "Auto-pause XP rate after 10m idle (neglects 6 of 10 minutes)",
+        key = "autoPauseEnabled",
+    })
 
     -- 6. Construct Scale Slider (0.5x to 2.0x)
     local scaleSlider = CreateFrame("Slider", "EFHelperConfigXPBarScale", p, "OptionsSliderTemplate")
@@ -1178,9 +1164,6 @@ local function CreateXPBarPanel(parent)
             local db = XPBar:GetDB()
             db.pos = nil
             db.scale = 1.0
-            if EFHelperCharDB then
-                EFHelperCharDB.xpBarPoint = nil
-            end
             XPBar:ApplyLayout()
             if scaleSlider then scaleSlider:SetValue(1.0) end
             print("|cff00ffff[EFHelper XPBar]|r Position and scale reset to default center.")
@@ -1218,11 +1201,7 @@ local function CreateXPBarPanel(parent)
     p.OnRefresh = function(self)
         if XPBar then
             local db = XPBar:GetDB()
-            enableCb:SetChecked(db.enabled ~= false)
-            lockCb:SetChecked(db.locked == true)
-            blizzCb:SetChecked(db.hideBlizzardBar == true)
-            rollingCb:SetChecked(db.rateMode ~= "total")
-            autoPauseCb:SetChecked(db.autoPauseEnabled ~= false)
+            RefreshCheckboxes(self)
             scaleSlider:SetValue(db.scale or 1.0)
             _G[scaleSlider:GetName() .. "Text"]:SetText(string.format("Construct Scale: %.2fx", db.scale or 1.0))
             local winVal = db.rollingWindowHours or 2.0
@@ -1252,60 +1231,55 @@ local function CreateTrainSpellsPanel(parent)
 
     -- Section 1: Core Toggles
     local sec1 = CreateSectionTitle(p, "Trainer Spells & Toast Settings", -14)
+    p._getDB = function() return TrainSpells and TrainSpells:GetDB() end
 
-    local enableCb = CreateFrame("CheckButton", "EFHelperConfigTrainSpellsEnable", p, "UICheckButtonTemplate")
-    enableCb:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -34)
-    _G[enableCb:GetName() .. "Text"]:SetText("Enable Train Spells Module")
-    enableCb:SetScript("OnClick", function(cb)
-        if TrainSpells then
-            local db = TrainSpells:GetDB()
-            db.enabled = cb:GetChecked()
-            if db.enabled then TrainSpells:Enable() else TrainSpells:Disable() end
-        end
-    end)
-
-    local spellbookTabCb = CreateFrame("CheckButton", "EFHelperConfigTrainSpellsTabEnable", p, "UICheckButtonTemplate")
-    spellbookTabCb:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -4)
-    _G[spellbookTabCb:GetName() .. "Text"]:SetText("Show 'Trainable Spells' Button in Spellbook")
-    spellbookTabCb:SetScript("OnClick", function(cb)
-        if TrainSpells then
-            local db = TrainSpells:GetDB()
-            db.showSpellbookTab = cb:GetChecked()
-            if TrainSpells.tabButton then
-                if db.showSpellbookTab then TrainSpells.tabButton:Show() else TrainSpells.tabButton:Hide() end
+    local enableCb = AddCheckbox(p, {
+        name = "EFHelperConfigTrainSpellsEnable",
+        label = "Enable Train Spells Module",
+        template = "UICheckButtonTemplate",
+        relativeTo = p,
+        x = 20,
+        y = -34,
+        key = "enabled",
+        onClick = function(_, checked)
+            if TrainSpells then
+                if checked then TrainSpells:Enable() else TrainSpells:Disable() end
             end
-        end
-    end)
-
-    local toastCb = CreateFrame("CheckButton", "EFHelperConfigTrainSpellsToastEnable", p, "UICheckButtonTemplate")
-    toastCb:SetPoint("TOPLEFT", spellbookTabCb, "BOTTOMLEFT", 0, -4)
-    _G[toastCb:GetName() .. "Text"]:SetText("Show Level-Up Trainer Toast Notification")
-    toastCb:SetScript("OnClick", function(cb)
-        if TrainSpells then
-            local db = TrainSpells:GetDB()
-            db.showLevelUpToast = cb:GetChecked()
-        end
-    end)
-
-    local soundCb = CreateFrame("CheckButton", "EFHelperConfigTrainSpellsSoundEnable", p, "UICheckButtonTemplate")
-    soundCb:SetPoint("TOPLEFT", toastCb, "BOTTOMLEFT", 0, -4)
-    _G[soundCb:GetName() .. "Text"]:SetText("Play Sound on Level-Up Toast")
-    soundCb:SetScript("OnClick", function(cb)
-        if TrainSpells then
-            local db = TrainSpells:GetDB()
-            db.sound = cb:GetChecked()
-        end
-    end)
-
-    local autoTrainCb = CreateFrame("CheckButton", "EFHelperConfigTrainSpellsAutoTrainEnable", p, "UICheckButtonTemplate")
-    autoTrainCb:SetPoint("TOPLEFT", soundCb, "BOTTOMLEFT", 0, -4)
-    _G[autoTrainCb:GetName() .. "Text"]:SetText("Auto-Train Selected Spells at Class Trainer")
-    autoTrainCb:SetScript("OnClick", function(cb)
-        if TrainSpells then
-            local db = TrainSpells:GetDB()
-            db.autoTrain = cb:GetChecked()
-        end
-    end)
+        end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigTrainSpellsTabEnable",
+        label = "Show 'Trainable Spells' Button in Spellbook",
+        template = "UICheckButtonTemplate",
+        y = -4,
+        key = "showSpellbookTab",
+        onClick = function(_, checked)
+            if TrainSpells and TrainSpells.tabButton then
+                if checked then TrainSpells.tabButton:Show() else TrainSpells.tabButton:Hide() end
+            end
+        end,
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigTrainSpellsToastEnable",
+        label = "Show Level-Up Trainer Toast Notification",
+        template = "UICheckButtonTemplate",
+        y = -4,
+        key = "showLevelUpToast",
+    })
+    AddCheckbox(p, {
+        name = "EFHelperConfigTrainSpellsSoundEnable",
+        label = "Play Sound on Level-Up Toast",
+        template = "UICheckButtonTemplate",
+        y = -4,
+        key = "sound",
+    })
+    local autoTrainCb = AddCheckbox(p, {
+        name = "EFHelperConfigTrainSpellsAutoTrainEnable",
+        label = "Auto-Train Selected Spells at Class Trainer",
+        template = "UICheckButtonTemplate",
+        y = -4,
+        key = "autoTrain",
+    })
 
     -- Section 2: Toast Duration Slider
     local sec2 = CreateSectionTitle(p, "Toast Notification Pacing", autoTrainCb, -10)
@@ -1384,11 +1358,7 @@ local function CreateTrainSpellsPanel(parent)
     p.OnRefresh = function(self)
         if TrainSpells then
             local db = TrainSpells:GetDB()
-            enableCb:SetChecked(db.enabled ~= false)
-            spellbookTabCb:SetChecked(db.showSpellbookTab ~= false)
-            toastCb:SetChecked(db.showLevelUpToast ~= false)
-            soundCb:SetChecked(db.sound ~= false)
-            autoTrainCb:SetChecked(db.autoTrain ~= false)
+            RefreshCheckboxes(self)
             local dur = db.toastDuration or 4.0
             durationSlider:SetValue(dur)
             _G[durationSlider:GetName() .. "Text"]:SetText(string.format("Duration: %.1fs", dur))
@@ -1418,52 +1388,47 @@ local function CreateWaypointBridgePanel(parent)
     desc:SetJustifyH("LEFT")
     desc:SetText("Dynamically translates your active RestedXP objective into a 3D world beacon in WaypointUI without modifying either addon.")
 
+    p._getDB = function() return WaypointBridge and WaypointBridge:GetDB() end
+
     -- 1. Enable Checkbox
-    local enableCb = CreateFrame("CheckButton", "EFHelperConfigWaypointBridgeEnable", p, "InterfaceOptionsCheckButtonTemplate")
-    enableCb:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
-    _G[enableCb:GetName() .. "Text"]:SetText("Enable RestedXP -> WaypointUI 3D Bridge")
-    enableCb:SetScript("OnClick", function(self)
-        if WaypointBridge then
-            local db = WaypointBridge:GetDB()
-            db.enabled = self:GetChecked() and true or false
-            if db.enabled then
-                WaypointBridge:Enable()
-                WaypointBridge:SyncObjective(true)
-            else
-                WaypointBridge:ClearSyncedWaypoint()
-                WaypointBridge:Disable()
+    local enableCb = AddCheckbox(p, {
+        name = "EFHelperConfigWaypointBridgeEnable",
+        label = "Enable RestedXP -> WaypointUI 3D Bridge",
+        relativeTo = desc,
+        key = "enabled",
+        onClick = function(_, checked)
+            if WaypointBridge then
+                if checked then
+                    WaypointBridge:Enable(); WaypointBridge:SyncObjective(true)
+                else
+                    WaypointBridge:ClearSyncedWaypoint(); WaypointBridge:Disable()
+                end
+                p:OnRefresh()
             end
-            p:OnRefresh()
-        end
-    end)
+        end,
+    })
     p.enableCb = enableCb
 
     -- 2. Show Rich Step Context Summary Checkbox
-    local summaryCb = CreateFrame("CheckButton", "EFHelperConfigWaypointBridgeSummary", p, "InterfaceOptionsCheckButtonTemplate")
-    summaryCb:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -2)
-    _G[summaryCb:GetName() .. "Text"]:SetText("Show Step Context Summary (NPCs, Mobs, & Live Objective Progress)")
-    summaryCb:SetScript("OnClick", function(self)
-        if WaypointBridge then
-            local db = WaypointBridge:GetDB()
-            db.showStepSummary = self:GetChecked() and true or false
-            WaypointBridge:SyncObjective(true)
-            p:OnRefresh()
-        end
-    end)
+    local summaryCb = AddCheckbox(p, {
+        name = "EFHelperConfigWaypointBridgeSummary",
+        label = "Show Step Context Summary (NPCs, Mobs, & Live Objective Progress)",
+        key = "showStepSummary",
+        onClick = function()
+            if WaypointBridge then WaypointBridge:SyncObjective(true); p:OnRefresh() end
+        end,
+    })
     p.summaryCb = summaryCb
 
     -- 3. Alter Waypoint Icon & Color by Objective Type Checkbox
-    local colorCb = CreateFrame("CheckButton", "EFHelperConfigWaypointBridgeColor", p, "InterfaceOptionsCheckButtonTemplate")
-    colorCb:SetPoint("TOPLEFT", summaryCb, "BOTTOMLEFT", 0, -2)
-    _G[colorCb:GetName() .. "Text"]:SetText("Alter Waypoint Icon & Color by Objective Type (Kill, Loot, Turn-In, Accept, etc.)")
-    colorCb:SetScript("OnClick", function(self)
-        if WaypointBridge then
-            local db = WaypointBridge:GetDB()
-            db.colorByType = self:GetChecked() and true or false
-            WaypointBridge:SyncObjective(true)
-            p:OnRefresh()
-        end
-    end)
+    local colorCb = AddCheckbox(p, {
+        name = "EFHelperConfigWaypointBridgeColor",
+        label = "Alter Waypoint Icon & Color by Objective Type (Kill, Loot, Turn-In, Accept, etc.)",
+        key = "colorByType",
+        onClick = function()
+            if WaypointBridge then WaypointBridge:SyncObjective(true); p:OnRefresh() end
+        end,
+    })
     p.colorCb = colorCb
 
     -- 4. Live Status Box
@@ -1540,9 +1505,7 @@ local function CreateWaypointBridgePanel(parent)
         if not WaypointBridge then return end
         local db = WaypointBridge:GetDB()
         local isEnabled = (db.enabled ~= false)
-        enableCb:SetChecked(isEnabled)
-        summaryCb:SetChecked(db.showStepSummary ~= false)
-        colorCb:SetChecked(db.colorByType ~= false)
+        RefreshCheckboxes(self)
 
         local info = WaypointBridge.GetStatusInfo and WaypointBridge:GetStatusInfo() or {}
         local rxpStr = info.rxpLoaded and "|cff00ff00Loaded|r" or "|cffff4444Not Loaded|r"
@@ -1682,16 +1645,4 @@ function Config:GetOrCreateWindow()
     configFrame = f
     Config.frame = f
     return f
-end
-
-function EFHelper:ToggleConfig(tabIndex)
-    local win = Config:GetOrCreateWindow()
-    if win:IsShown() and not tabIndex then
-        win:Hide()
-    else
-        if tabIndex and panels[tabIndex] then
-            SelectTab(tabIndex)
-        end
-        win:Show()
-    end
 end
