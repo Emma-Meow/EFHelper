@@ -250,7 +250,8 @@ local function AddCheckbox(parent, opts)
         local db = getDB and getDB()
         if opts.get then return opts.get(db) and true or false end
         if not db or not opts.key then return false end
-        return opts.default == false and (db[opts.key] == true) or (db[opts.key] ~= false)
+        if opts.default == false then return db[opts.key] == true end
+        return db[opts.key] ~= false
     end
 
     cb:SetScript("OnClick", function(self)
@@ -275,10 +276,126 @@ local function AddCheckbox(parent, opts)
 end
 
 local function RefreshCheckboxes(panel)
-    if not panel or not panel._checkboxes then return end
-    for _, entry in ipairs(panel._checkboxes) do
-        entry.refresh()
+    if not panel then return end
+    if panel._checkboxes then
+        for _, entry in ipairs(panel._checkboxes) do
+            entry.refresh()
+        end
     end
+    if panel._sliders then
+        for _, entry in ipairs(panel._sliders) do
+            entry.refresh()
+        end
+    end
+end
+
+-- Helper to create styled panel headers (title + description)
+local function CreatePanelHeader(parent, titleText, descText)
+    local title = parent:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
+    title:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, -18)
+    title:SetText(titleText)
+
+    local desc = parent:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    desc:SetPoint("RIGHT", parent, "RIGHT", -20, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetText(descText)
+
+    return desc
+end
+
+-- Helper to create standardized action buttons
+local function AddButton(parent, opts)
+    local btn = CreateFrame("Button", opts.name, parent, opts.template or "UIPanelButtonTemplate")
+    btn:SetSize(opts.width or 140, opts.height or 24)
+    local rel = opts.relativeTo or parent
+    local point = opts.point or "TOPLEFT"
+    local relPoint = opts.relPoint or (opts.point == "LEFT" and "RIGHT" or ((rel == parent) and "TOPLEFT" or "BOTTOMLEFT"))
+    btn:SetPoint(point, rel, relPoint, opts.x or 0, opts.y or 0)
+    if opts.text then btn:SetText(opts.text) end
+    if opts.onClick then btn:SetScript("OnClick", opts.onClick) end
+    return btn
+end
+
+-- Helper to create standardized sliders with automatic DB binding & OnRefresh sync
+local function AddSlider(parent, opts)
+    local slider = CreateFrame("Slider", opts.name, parent, opts.template or "OptionsSliderTemplate")
+    slider:SetSize(opts.width or 210, opts.height or 16)
+    local rel = opts.relativeTo or parent
+    local point = opts.point or "TOPLEFT"
+    local relPoint = opts.relPoint or (opts.point == "LEFT" and "RIGHT" or ((rel == parent) and "TOPLEFT" or "BOTTOMLEFT"))
+    slider:SetPoint(point, rel, relPoint, opts.x or 0, opts.y or 0)
+    slider:SetMinMaxValues(opts.min or 0, opts.max or 100)
+    slider:SetValueStep(opts.step or 1)
+    if opts.obeyStep ~= false then slider:SetObeyStepOnDrag(true) end
+
+    local name = slider:GetName()
+    if name then
+        if opts.lowText and _G[name .. "Low"] then _G[name .. "Low"]:SetText(opts.lowText) end
+        if opts.highText and _G[name .. "High"] then _G[name .. "High"]:SetText(opts.highText) end
+    end
+
+    local getDB = opts.getDB or parent._getDB
+    local function UpdateText(val)
+        if name and _G[name .. "Text"] and opts.format then
+            _G[name .. "Text"]:SetText(string.format(opts.format, val))
+        end
+    end
+
+    slider:SetScript("OnValueChanged", function(self, value)
+        local step = opts.step or 1
+        local val = math.floor(value / step + 0.5) * step
+        local db = getDB and getDB()
+        if opts.key and db then db[opts.key] = val end
+        UpdateText(val)
+        if opts.onValueChanged then opts.onValueChanged(val, db, self) end
+    end)
+
+    parent._sliders = parent._sliders or {}
+    table.insert(parent._sliders, {
+        slider = slider,
+        refresh = function()
+            local db = getDB and getDB()
+            local val = (db and opts.key and db[opts.key]) or opts.default or opts.min or 0
+            slider:SetValue(val)
+            UpdateText(val)
+        end,
+    })
+
+    return slider
+end
+
+-- Helper to create styled info/guide/status backdrop boxes
+local function AddInfoBox(parent, textOrOpts, relativeTo, yOffset)
+    local opts = type(textOrOpts) == "table" and textOrOpts or { text = textOrOpts, relativeTo = relativeTo, y = yOffset }
+    local box = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local rel = opts.relativeTo or parent._lastCb or parent
+    local relPoint = (rel == parent) and "TOPLEFT" or "BOTTOMLEFT"
+    box:SetPoint("TOPLEFT", rel, relPoint, opts.x or 0, opts.y or -10)
+    if opts.height then
+        box:SetHeight(opts.height)
+        box:SetPoint("RIGHT", parent, "RIGHT", -20, 0)
+    else
+        box:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -20, opts.bottom or 14)
+    end
+    box:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8X8",
+        edgeFile = "Interface\\Buttons\\WHITE8X8",
+        edgeSize = 1,
+        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    })
+    box:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
+    box:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
+
+    local infoText = box:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    infoText:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -8)
+    infoText:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -10, 8)
+    infoText:SetJustifyH("LEFT")
+    infoText:SetJustifyV("TOP")
+    if opts.text then infoText:SetText(opts.text) end
+
+    box.text = infoText
+    return box
 end
 
 -- ----------------------------------------------------------------------------
@@ -289,15 +406,7 @@ local function CreateTaggingPanel(parent)
     p:SetAllPoints()
 
     -- Title & Description
-    local title = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
-    title:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -18)
-    title:SetText("Targeting & Macro Hub")
-
-    local desc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-    desc:SetPoint("RIGHT", p, "RIGHT", -20, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("Creates fast pull/tagging macros with automatic target acquisition and skull ping.")
+    local desc = CreatePanelHeader(p, "Targeting & Macro Hub", "Creates fast pull/tagging macros with automatic target acquisition and skull ping.")
 
     -- 1. Mob Name Section
     local mobLabel = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -310,21 +419,22 @@ local function CreateTaggingPanel(parent)
     mobInput:SetAutoFocus(false)
     mobInput:SetMaxLetters(50)
 
-    local targetBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    targetBtn:SetSize(100, 24)
-    targetBtn:SetPoint("LEFT", mobInput, "RIGHT", 10, 0)
-    targetBtn:SetText("Get Target")
-    targetBtn:SetScript("OnClick", function()
-        if UnitExists("target") then
-            local targetName = (Utils and Utils.GetUnitName and Utils.GetUnitName("target")) or "Target"
-            if targetName and targetName ~= "" then
-                mobInput:SetText(targetName)
-                mobInput:ClearFocus()
+    local targetBtn = AddButton(p, {
+        width = 100, height = 24,
+        point = "LEFT", relativeTo = mobInput, x = 10,
+        text = "Get Target",
+        onClick = function()
+            if UnitExists("target") then
+                local targetName = (Utils and Utils.GetUnitName and Utils.GetUnitName("target")) or "Target"
+                if targetName and targetName ~= "" then
+                    mobInput:SetText(targetName)
+                    mobInput:ClearFocus()
+                end
+            else
+                print("|cffff4444[EFHelper]|r You do not have a target selected.")
             end
-        else
-            print("|cffff4444[EFHelper]|r You do not have a target selected.")
-        end
-    end)
+        end,
+    })
 
     -- 2. Tagging Ability Section
     local spellLabel = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -395,58 +505,58 @@ local function CreateTaggingPanel(parent)
     end
 
     -- 4. Create / Update Macro Button & Feedback
-    local createMacroBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    createMacroBtn:SetSize(180, 28)
-    createMacroBtn:SetPoint("TOPLEFT", macroLabel, "BOTTOMLEFT", 4, -38)
-    createMacroBtn:SetText("Create / Update Macro")
+    local createMacroBtn = AddButton(p, {
+        width = 180, height = 28,
+        relativeTo = macroLabel, x = 4, y = -38,
+        text = "Create / Update Macro",
+        onClick = function()
+            local mobName = mobInput:GetText()
+            if not mobName or mobName:match("^%s*$") then
+                feedback:SetText("|cffff4444Please enter or target a mob name first.|r")
+                return
+            end
+
+            local currentSpell = (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.lastSpell) or EFHelper.selectedSpell
+            local success = false
+            if EFHelper.Tagging and EFHelper.Tagging.CreateOrUpdateTaggingMacro then
+                success = EFHelper.Tagging:CreateOrUpdateTaggingMacro(
+                    selectedMacroName or "EFTag",
+                    mobName,
+                    currentSpell,
+                    true
+                )
+            elseif EFHelper.CreateOrUpdateTaggingMacro then
+                success = EFHelper:CreateOrUpdateTaggingMacro(
+                    selectedMacroName or "EFTag",
+                    mobName,
+                    currentSpell,
+                    true
+                )
+            end
+
+            if success then
+                if EFHelper.db then
+                    if EFHelper.db.profile then
+                        EFHelper.db.profile.lastMobName = mobName
+                        EFHelper.db.profile.lastSpell = currentSpell
+                    end
+                    if EFHelper.db.char then
+                        EFHelper.db.char.lastMobName = mobName
+                        EFHelper.db.char.lastSpell = currentSpell
+                    end
+                end
+                feedback:SetText(string.format("|cff00ff00Macro '%s' saved! Drag from /m to bar.|r", selectedMacroName or "EFTag"))
+            else
+                feedback:SetText("|cffff4444Failed to update macro. Check macro limit.|r")
+            end
+        end,
+    })
 
     local feedback = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     feedback:SetPoint("LEFT", createMacroBtn, "RIGHT", 12, 0)
     feedback:SetPoint("RIGHT", p, "RIGHT", -20, 0)
     feedback:SetJustifyH("LEFT")
     feedback:SetText("")
-
-    createMacroBtn:SetScript("OnClick", function()
-        local mobName = mobInput:GetText()
-        if not mobName or mobName:match("^%s*$") then
-            feedback:SetText("|cffff4444Please enter or target a mob name first.|r")
-            return
-        end
-
-        local currentSpell = (EFHelper.db and EFHelper.db.profile and EFHelper.db.profile.lastSpell) or EFHelper.selectedSpell
-        local success = false
-        if EFHelper.Tagging and EFHelper.Tagging.CreateOrUpdateTaggingMacro then
-            success = EFHelper.Tagging:CreateOrUpdateTaggingMacro(
-                selectedMacroName or "EFTag",
-                mobName,
-                currentSpell,
-                true
-            )
-        elseif EFHelper.CreateOrUpdateTaggingMacro then
-            success = EFHelper:CreateOrUpdateTaggingMacro(
-                selectedMacroName or "EFTag",
-                mobName,
-                currentSpell,
-                true
-            )
-        end
-
-        if success then
-            if EFHelper.db then
-                if EFHelper.db.profile then
-                    EFHelper.db.profile.lastMobName = mobName
-                    EFHelper.db.profile.lastSpell = currentSpell
-                end
-                if EFHelper.db.char then
-                    EFHelper.db.char.lastMobName = mobName
-                    EFHelper.db.char.lastSpell = currentSpell
-                end
-            end
-            feedback:SetText(string.format("|cff00ff00Macro '%s' saved! Drag from /m to bar.|r", selectedMacroName or "EFTag"))
-        else
-            feedback:SetText("|cffff4444Failed to update macro. Check macro limit.|r")
-        end
-    end)
 
     -- Hint text
     local hint = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
@@ -477,31 +587,17 @@ local function CreateTaggingPanel(parent)
     p.silentCb = silentCb
 
     -- 5. Information Box
-    local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", silentCb, "BOTTOMLEFT", 2, -6)
-    infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
-    infoBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
+    AddInfoBox(p, {
+        text = "|cffffd100Tagging & Macro Hub Features:|r\n" ..
+            "• |cffffffffInstant Tagging|r: Generates a macro that instantly acquires target and casts your selected spell.\n" ..
+            "• |cffffffffRaid Ping|r: Automatically drops a skull raid target marker on the target to alert party members.\n" ..
+            "• |cffffffffFFA Auto-Loot Toggle|r: Displays a compact floating toggle when party loot is set to Free-For-All.\n" ..
+            "• |cffffffffTarget Mirror|r: Press 'Get Target' while targeting any mob to populate the name automatically.\n" ..
+            "• Slash commands: |cff00ffff/efh|r (config) or drag the macro from |cff00ffff/m|r directly to your action bar.",
+        relativeTo = silentCb,
+        x = 2,
+        y = -6,
     })
-    infoBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    infoBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local infoText = infoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    infoText:SetPoint("TOPLEFT", infoBox, "TOPLEFT", 10, -8)
-    infoText:SetPoint("BOTTOMRIGHT", infoBox, "BOTTOMRIGHT", -10, 8)
-    infoText:SetJustifyH("LEFT")
-    infoText:SetJustifyV("TOP")
-    infoText:SetText(
-        "|cffffd100Tagging & Macro Hub Features:|r\n" ..
-        "• |cffffffffInstant Tagging|r: Generates a macro that instantly acquires target and casts your selected spell.\n" ..
-        "• |cffffffffRaid Ping|r: Automatically drops a skull raid target marker on the target to alert party members.\n" ..
-        "• |cffffffffFFA Auto-Loot Toggle|r: Displays a compact floating toggle when party loot is set to Free-For-All.\n" ..
-        "• |cffffffffTarget Mirror|r: Press 'Get Target' while targeting any mob to populate the name automatically.\n" ..
-        "• Slash commands: |cff00ffff/efh|r (config) or drag the macro from |cff00ffff/m|r directly to your action bar."
-    )
 
     p.mobInput = mobInput
     p.spellDropdown = spellDropdown
@@ -533,15 +629,7 @@ local function CreateCampfirePanel(parent)
     local Campfire = addonTable.Campfire or EFHelper.Campfire
 
     -- Title & Description
-    local title = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
-    title:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -18)
-    title:SetText("Campfire HUD & Floating Alerts")
-
-    local desc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-    desc:SetPoint("RIGHT", p, "RIGHT", -20, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("Shows active campfire benefits in equivalent WoW buffs below the Minimap, and alerts when near a tent.")
+    local desc = CreatePanelHeader(p, "Campfire HUD & Floating Alerts", "Shows active campfire benefits in equivalent WoW buffs below the Minimap, and alerts when near a tent.")
 
     -- 1. Enable Checkbox
     p._getDB = function() return Campfire and Campfire:GetDB() end
@@ -560,120 +648,90 @@ local function CreateCampfirePanel(parent)
     p.enableCb = enableCb
 
     -- Status Box
-    local statusBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    statusBox:SetPoint("TOPLEFT", enableCb, "BOTTOMLEFT", 0, -10)
-    statusBox:SetPoint("RIGHT", p, "RIGHT", -20, 0)
-    statusBox:SetHeight(74)
-    statusBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    statusBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    statusBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local statusText = statusBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    statusText:SetPoint("TOPLEFT", statusBox, "TOPLEFT", 10, -8)
-    statusText:SetPoint("BOTTOMRIGHT", statusBox, "BOTTOMRIGHT", -10, 8)
-    statusText:SetJustifyH("LEFT")
-    statusText:SetJustifyV("TOP")
-    p.statusText = statusText
+    local statusBox = AddInfoBox(p, { relativeTo = enableCb, y = -10, height = 74 })
+    p.statusText = statusBox.text
 
     -- Control Buttons
     -- 1. Test Mode Toggle Button
-    local testBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    testBtn:SetSize(180, 26)
-    testBtn:SetPoint("TOPLEFT", statusBox, "BOTTOMLEFT", 0, -14)
-    testBtn:SetText("Toggle HUD Test Mode")
+    local testBtn = AddButton(p, {
+        width = 180, height = 26,
+        relativeTo = statusBox, y = -14,
+        text = "Toggle HUD Test Mode",
+        onClick = function()
+            if Campfire and Campfire.ToggleTestMode then
+                local active = Campfire:ToggleTestMode()
+                p:OnRefresh()
+                if active then
+                    print("|cff0cd29f[EFHelper]|r Campfire HUD test mode |cff00ff00enabled|r. Drag HUD to reposition.")
+                elseif active == false then
+                    print("|cff0cd29f[EFHelper]|r Campfire HUD test mode |cffff4444disabled|r.")
+                end
+            end
+        end,
+    })
 
     local testStatus = p:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     testStatus:SetPoint("LEFT", testBtn, "RIGHT", 12, 0)
     p.testStatus = testStatus
 
-    testBtn:SetScript("OnClick", function()
-        if Campfire and Campfire.ToggleTestMode then
-            local active = Campfire:ToggleTestMode()
-            p:OnRefresh()
-            if active then
-                print("|cff0cd29f[EFHelper]|r Campfire HUD test mode |cff00ff00enabled|r. Drag HUD to reposition.")
-            elseif active == false then
-                print("|cff0cd29f[EFHelper]|r Campfire HUD test mode |cffff4444disabled|r.")
-            end
-        end
-    end)
-
     -- 2. Reset Position Button
-    local resetBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    resetBtn:SetSize(180, 26)
-    resetBtn:SetPoint("TOPLEFT", testBtn, "BOTTOMLEFT", 0, -8)
-    resetBtn:SetText("Reset HUD Position")
-    resetBtn:SetScript("OnClick", function()
-        if Campfire and Campfire.ResetPosition then
-            Campfire:ResetPosition()
-            print("|cff0cd29f[EFHelper]|r Campfire HUD position reset to below Minimap.")
-        end
-    end)
+    local resetBtn = AddButton(p, {
+        width = 180, height = 26,
+        relativeTo = testBtn, y = -8,
+        text = "Reset HUD Position",
+        onClick = function()
+            if Campfire and Campfire.ResetPosition then
+                Campfire:ResetPosition()
+                print("|cff0cd29f[EFHelper]|r Campfire HUD position reset to below Minimap.")
+            end
+        end,
+    })
 
     local resetDesc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     resetDesc:SetPoint("LEFT", resetBtn, "RIGHT", 12, 0)
     resetDesc:SetText("Returns HUD anchor to below the Minimap.")
 
     -- 3. Print Active Buffs Button
-    local printBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    printBtn:SetSize(180, 26)
-    printBtn:SetPoint("TOPLEFT", resetBtn, "BOTTOMLEFT", 0, -8)
-    printBtn:SetText("Print Buffs to Chat")
-    printBtn:SetScript("OnClick", function()
-        if Campfire and Campfire.PrintBuffs then
-            Campfire:PrintBuffs()
-        end
-    end)
+    local printBtn = AddButton(p, {
+        width = 180, height = 26,
+        relativeTo = resetBtn, y = -8,
+        text = "Print Buffs to Chat",
+        onClick = function()
+            if Campfire and Campfire.PrintBuffs then
+                Campfire:PrintBuffs()
+            end
+        end,
+    })
 
     local printDesc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     printDesc:SetPoint("LEFT", printBtn, "RIGHT", 12, 0)
     printDesc:SetText("Prints detected campfire buffs and stats to chat.")
 
     -- 4. Tooltip Debug Dump Button
-    local dumpBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    dumpBtn:SetSize(180, 26)
-    dumpBtn:SetPoint("TOPLEFT", printBtn, "BOTTOMLEFT", 0, -8)
-    dumpBtn:SetText("Tooltip Debug Scan")
-    dumpBtn:SetScript("OnClick", function()
-        if Campfire and Campfire.DumpDebug then
-            Campfire:DumpDebug()
-        end
-    end)
+    local dumpBtn = AddButton(p, {
+        width = 180, height = 26,
+        relativeTo = printBtn, y = -8,
+        text = "Tooltip Debug Scan",
+        onClick = function()
+            if Campfire and Campfire.DumpDebug then
+                Campfire:DumpDebug()
+            end
+        end,
+    })
 
     local dumpDesc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     dumpDesc:SetPoint("LEFT", dumpBtn, "RIGHT", 12, 0)
     dumpDesc:SetText("Scans GameTooltip and outputs raw text lines for debugging.")
 
     -- 5. Information Box
-    local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", dumpBtn, "BOTTOMLEFT", 0, -14)
-    infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
-    infoBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    infoBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    infoBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local infoText = infoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    infoText:SetPoint("TOPLEFT", infoBox, "TOPLEFT", 10, -8)
-    infoText:SetPoint("BOTTOMRIGHT", infoBox, "BOTTOMRIGHT", -10, 8)
-    infoText:SetJustifyH("LEFT")
-    infoText:SetJustifyV("TOP")
-    infoText:SetText(
+    AddInfoBox(p,
         "|cffffd100Campfire HUD & Resting Mechanics:|r\n" ..
         "• |cffffffffCamp Benefits|r: Detects active campfire aura to confirm you are accumulating Rested XP.\n" ..
         "• |cffffffffNearby Campfire|r: Identifies proximity to any player-placed campfire or cosy tent.\n" ..
         "• |cffffffffBoosted Rest|r: Monitors tent rest buff cooldowns to optimize your resting cycles.\n" ..
         "• |cffffffffHUD Position|r: Sits below the Minimap by default. Enable Test Mode to drag anywhere.\n" ..
-        "• Configuration: Use the controls above to toggle the module, test position, or print detected buffs."
+        "• Configuration: Use the controls above to toggle the module, test position, or print detected buffs.",
+        dumpBtn, -14
     )
 
     p.OnRefresh = function(self)
@@ -729,15 +787,7 @@ local function CreateSwapperPanel(parent)
     local Swapper = addonTable.Swapper or EFHelper.Swapper
 
     -- Title & Description
-    local title = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
-    title:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -18)
-    title:SetText("Raid Subgroup Swapper")
-
-    local desc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-    desc:SetPoint("RIGHT", p, "RIGHT", -20, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("Executes combat raid swaps via a dummy character stationed outside the raid instance.")
+    local desc = CreatePanelHeader(p, "Raid Subgroup Swapper", "Executes combat raid swaps via a dummy character stationed outside the raid instance.")
 
     -- Dummy Character Name Input
     local dummyLabel = p:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -764,68 +814,54 @@ local function CreateSwapperPanel(parent)
         p:OnRefresh()
     end)
 
-    local targetDummyBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    targetDummyBtn:SetSize(100, 24)
-    targetDummyBtn:SetPoint("LEFT", dummyInput, "RIGHT", 10, 0)
-    targetDummyBtn:SetText("Get Target")
-    targetDummyBtn:SetScript("OnClick", function()
-        if UnitExists("target") then
-            local tName = (Utils and Utils.GetUnitName and Utils.GetUnitName("target")) or "Target"
-            if tName and tName ~= "" then
-                dummyInput:SetText(tName)
-                if Swapper then
-                    local db = Swapper:GetDB()
-                    db.dummyName = tName
+    local targetDummyBtn = AddButton(p, {
+        width = 100, height = 24,
+        point = "LEFT", relativeTo = dummyInput, x = 10,
+        text = "Get Target",
+        onClick = function()
+            if UnitExists("target") then
+                local tName = (Utils and Utils.GetUnitName and Utils.GetUnitName("target")) or "Target"
+                if tName and tName ~= "" then
+                    dummyInput:SetText(tName)
+                    if Swapper then
+                        local db = Swapper:GetDB()
+                        db.dummyName = tName
+                    end
+                    dummyInput:ClearFocus()
+                    print("|cff00ff00[EFHelper Swapper]|r Dummy character set to: |cffffd100" .. tName .. "|r")
                 end
-                dummyInput:ClearFocus()
-                print("|cff00ff00[EFHelper Swapper]|r Dummy character set to: |cffffd100" .. tName .. "|r")
+            else
+                print("|cffff4444[EFHelper]|r You do not have a target selected.")
             end
-        else
-            print("|cffff4444[EFHelper]|r You do not have a target selected.")
-        end
-    end)
+        end,
+    })
 
     -- Actions & Toggles
-    local toggleHudBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    toggleHudBtn:SetSize(160, 26)
-    toggleHudBtn:SetPoint("TOPLEFT", dummyInput, "BOTTOMLEFT", -4, -14)
-    toggleHudBtn:SetText("Toggle Selection HUD")
-    toggleHudBtn:SetScript("OnClick", function()
-        if Swapper and Swapper.ToggleHUD then
-            Swapper:ToggleHUD()
-            p:OnRefresh()
-        end
-    end)
+    local toggleHudBtn = AddButton(p, {
+        width = 160, height = 26,
+        relativeTo = dummyInput, x = -4, y = -14,
+        text = "Toggle Selection HUD",
+        onClick = function()
+            if Swapper and Swapper.ToggleHUD then
+                Swapper:ToggleHUD()
+                p:OnRefresh()
+            end
+        end,
+    })
 
-    local clearSlotsBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    clearSlotsBtn:SetSize(130, 26)
-    clearSlotsBtn:SetPoint("LEFT", toggleHudBtn, "RIGHT", 10, 0)
-    clearSlotsBtn:SetText("Clear Selections")
-    clearSlotsBtn:SetScript("OnClick", function()
-        if Swapper and Swapper.ClearSlots then
-            Swapper:ClearSlots()
-        end
-    end)
+    local clearSlotsBtn = AddButton(p, {
+        width = 130, height = 26,
+        point = "LEFT", relativeTo = toggleHudBtn, x = 10,
+        text = "Clear Selections",
+        onClick = function()
+            if Swapper and Swapper.ClearSlots then
+                Swapper:ClearSlots()
+            end
+        end,
+    })
 
     -- Info & Macro Guide Box
-    local guideBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    guideBox:SetPoint("TOPLEFT", toggleHudBtn, "BOTTOMLEFT", 0, -14)
-    guideBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
-    guideBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    guideBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    guideBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local guideText = guideBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    guideText:SetPoint("TOPLEFT", guideBox, "TOPLEFT", 10, -10)
-    guideText:SetPoint("BOTTOMRIGHT", guideBox, "BOTTOMRIGHT", -10, 10)
-    guideText:SetJustifyH("LEFT")
-    guideText:SetJustifyV("TOP")
-    guideText:SetText(
+    AddInfoBox(p,
         "|cffffd100How to Use (Macro Setup):|r\n" ..
         "• |cff00ff00Macro 1:|r |cffffffff/efswap 1|r  (hover over Player 1 raid frame or target)\n" ..
         "• |cff00ff00Macro 2:|r |cffffffff/efswap 2|r  (hover over Player 2 raid frame or target)\n" ..
@@ -833,7 +869,8 @@ local function CreateSwapperPanel(parent)
         "|cffffd100Dummy Character Requirements:|r\n" ..
         "• Must be inside the raid group, but |cffff4444parked outside the raid instance|r.\n" ..
         "• Must be promoted to |cff00ffffRaid Assistant|r or |cff00ffffRaid Leader|r.\n" ..
-        "• Any member of the raid is authorized to request swaps."
+        "• Any member of the raid is authorized to request swaps.",
+        toggleHudBtn, -14
     )
 
     p.OnRefresh = function(self)
@@ -856,15 +893,7 @@ local function CreateXPPanel(parent)
     local XP = addonTable.XP or EFHelper.XP
 
     -- Title & Description
-    local title = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
-    title:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -18)
-    title:SetText("Kill XP Predictor (Solo & Party 2–5)")
-
-    local desc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-    desc:SetPoint("RIGHT", p, "RIGHT", -20, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("Calculates predicted kill experience for targeted hostile mobs based on classic ZD formulas, 2–5 player party scaling, and dungeon modifiers.")
+    local desc = CreatePanelHeader(p, "Kill XP Predictor (Solo & Party 2–5)", "Calculates predicted kill experience for targeted hostile mobs based on classic ZD formulas, 2–5 player party scaling, and dungeon modifiers.")
 
     p._getDB = function() return XP and XP:GetDB() end
 
@@ -925,107 +954,89 @@ local function CreateXPPanel(parent)
     })
 
     -- 9. Weighting Model Selector
-    local modelBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    modelBtn:SetSize(230, 24)
-    modelBtn:SetPoint("TOPLEFT", groupCb, "BOTTOMLEFT", 4, -6)
-    modelBtn:SetText("Model: Standard (L+2)/(ΣL+2n)")
+    local modelBtn = AddButton(p, {
+        width = 230, height = 24,
+        relativeTo = groupCb, x = 4, y = -6,
+        text = "Model: Standard (L+2)/(ΣL+2n)",
+        onClick = function()
+            if XP then
+                local db = XP:GetDB()
+                db.formulaModel = (db.formulaModel == "laplace") and "standard" or "laplace"
+                p:OnRefresh()
+                XP:UpdateHUD()
+                print("|cff00ccff[EFHelper XP]|r Switched formula model to: |cffffd100" .. db.formulaModel .. "|r")
+            end
+        end,
+    })
     p.modelBtn = modelBtn
 
     local modelDesc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
     modelDesc:SetPoint("LEFT", modelBtn, "RIGHT", 10, 0)
     modelDesc:SetText("Click to toggle Laplace (L+1)/(ΣL+n)")
 
-    modelBtn:SetScript("OnClick", function()
-        if XP then
-            local db = XP:GetDB()
-            if db.formulaModel == "laplace" then
-                db.formulaModel = "standard"
-            else
-                db.formulaModel = "laplace"
+    -- 10. Test Logs Controls
+    local clearLogsBtn = AddButton(p, {
+        width = 140, height = 24,
+        relativeTo = modelBtn, y = -6,
+        text = "Clear Test Logs",
+        onClick = function()
+            if XP and XP.ClearLogs then
+                XP:ClearLogs()
+            elseif EFHelperDB and EFHelperDB.XP then
+                EFHelperDB.XP.testLogs = {}
             end
             p:OnRefresh()
-            XP:UpdateHUD()
-            print("|cff00ccff[EFHelper XP]|r Switched formula model to: |cffffd100" .. db.formulaModel .. "|r")
-        end
-    end)
-
-    -- 10. Test Logs Controls
-    local clearLogsBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    clearLogsBtn:SetSize(140, 24)
-    clearLogsBtn:SetPoint("TOPLEFT", modelBtn, "BOTTOMLEFT", 0, -6)
-    clearLogsBtn:SetText("Clear Test Logs")
+            print("|cff00ccff[EFHelper XP]|r Saved test logs cleared.")
+        end,
+    })
 
     local logsCountText = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     logsCountText:SetPoint("LEFT", clearLogsBtn, "RIGHT", 10, 0)
     p.logsCountText = logsCountText
 
-    clearLogsBtn:SetScript("OnClick", function()
-        if XP and XP.ClearLogs then
-            XP:ClearLogs()
-        elseif EFHelperDB and EFHelperDB.XP then
-            EFHelperDB.XP.testLogs = {}
-        end
-        p:OnRefresh()
-        print("|cff00ccff[EFHelper XP]|r Saved test logs cleared.")
-    end)
-
     -- 11. Action Buttons (Preview Test Mode & Reset Position)
-    local testBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    testBtn:SetSize(140, 24)
-    testBtn:SetPoint("TOPLEFT", clearLogsBtn, "BOTTOMLEFT", 0, -8)
-    testBtn:SetText("Preview Display")
-    p.testBtn = testBtn
-    testBtn:SetScript("OnClick", function()
-        if XP then
-            XP.isTestMode = not XP.isTestMode
-            XP:UpdateHUD()
-            testBtn:SetText(XP.isTestMode and "Stop Preview" or "Preview Display")
-        end
-    end)
-
-    local resetPosBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    resetPosBtn:SetSize(140, 24)
-    resetPosBtn:SetPoint("LEFT", testBtn, "RIGHT", 12, 0)
-    resetPosBtn:SetText("Reset Position")
-    resetPosBtn:SetScript("OnClick", function()
-        if XP then
-            local db = XP:GetDB()
-            db.posX = 0
-            db.posY = 130
-            if XP.hud then
-                XP.hud:ClearAllPoints()
-                XP.hud:SetPoint("CENTER", UIParent, "CENTER", 0, 130)
+    local testBtn = AddButton(p, {
+        width = 140, height = 24,
+        relativeTo = clearLogsBtn, y = -8,
+        text = "Preview Display",
+        onClick = function()
+            if XP then
+                XP.isTestMode = not XP.isTestMode
+                XP:UpdateHUD()
+                testBtn:SetText(XP.isTestMode and "Stop Preview" or "Preview Display")
             end
-            print("|cff0cd29f[EFHelper XP]|r Display position reset to center.")
-        end
-    end)
+        end,
+    })
+    p.testBtn = testBtn
+
+    local resetPosBtn = AddButton(p, {
+        width = 140, height = 24,
+        point = "LEFT", relativeTo = testBtn, x = 12,
+        text = "Reset Position",
+        onClick = function()
+            if XP then
+                local db = XP:GetDB()
+                db.posX = 0
+                db.posY = 130
+                if XP.hud then
+                    XP.hud:ClearAllPoints()
+                    XP.hud:SetPoint("CENTER", UIParent, "CENTER", 0, 130)
+                end
+                print("|cff0cd29f[EFHelper XP]|r Display position reset to center.")
+            end
+        end,
+    })
 
     -- Information Box
-    local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", testBtn, "BOTTOMLEFT", 0, -10)
-    infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
-    infoBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    infoBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    infoBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local infoText = infoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    infoText:SetPoint("TOPLEFT", infoBox, "TOPLEFT", 10, -8)
-    infoText:SetPoint("BOTTOMRIGHT", infoBox, "BOTTOMRIGHT", -10, 8)
-    infoText:SetJustifyH("LEFT")
-    infoText:SetJustifyV("TOP")
-    infoText:SetText(
+    AddInfoBox(p,
         "|cffffd100Kill XP Predictor Notes:|r\n" ..
         "• Displays |cffffffffonly for hostile/attackable NPC targets|r in open world and 5-man dungeons.\n" ..
         "• |cffccccccEfficiency & Expected HP|r: Computes |cffffffff(XP / ExpectedHP) * 100|r and compares actual vs. expected HP.\n" ..
         "• |cffffd100Party Predictor (2–5 Players)|r: Calculates individual player base pools, share weighting, and group bonus.\n" ..
         "• |cffffa500Dungeon Modifier (0.4x)|r: Automatically applies the dungeon farming anti-nerf multiplier inside 5-man instances.\n" ..
         "• Left-click and drag the text while visible to reposition it anywhere on your screen.\n" ..
-        "• Slash commands: |cff00ffff/efxp logs|r (view recorded kill stats), |cff00ffff/efxp clearlogs|r (clear recorded logs)."
+        "• Slash commands: |cff00ffff/efxp logs|r (view recorded kill stats), |cff00ffff/efxp clearlogs|r (clear recorded logs).",
+        testBtn, -10
     )
 
     p.OnRefresh = function(self)
@@ -1054,15 +1065,7 @@ local function CreateXPBarPanel(parent)
     local XPBar = addonTable.XPBar or EFHelper.XPBar
 
     -- Title & Description
-    local title = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
-    title:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -18)
-    title:SetText("Custom Experience Bar")
-
-    local desc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-    desc:SetPoint("RIGHT", p, "RIGHT", -20, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("High-information experience bar with completed quest XP overlay, dual clocks, and pace forecasting.")
+    local desc = CreatePanelHeader(p, "Custom Experience Bar", "High-information experience bar with completed quest XP overlay, dual clocks, and pace forecasting.")
 
     p._getDB = function() return XPBar and XPBar:GetDB() end
     p._cbSpacing = -4
@@ -1109,104 +1112,69 @@ local function CreateXPBarPanel(parent)
     })
 
     -- 6. Construct Scale Slider (0.5x to 2.0x)
-    local scaleSlider = CreateFrame("Slider", "EFHelperConfigXPBarScale", p, "OptionsSliderTemplate")
-    scaleSlider:SetPoint("TOPLEFT", autoPauseCb, "BOTTOMLEFT", 10, -20)
-    scaleSlider:SetSize(210, 16)
-    scaleSlider:SetMinMaxValues(0.5, 2.0)
-    scaleSlider:SetValueStep(0.05)
-    _G[scaleSlider:GetName() .. "Low"]:SetText("0.5x")
-    _G[scaleSlider:GetName() .. "High"]:SetText("2.0x")
-    scaleSlider:SetScript("OnValueChanged", function(self, value)
-        local val = math.floor(value * 20 + 0.5) / 20
-        if XPBar then
-            local db = XPBar:GetDB()
-            db.scale = val
-            XPBar:ApplyLayout()
-        end
-        _G[self:GetName() .. "Text"]:SetText(string.format("Construct Scale: %.2fx", val))
-    end)
+    local scaleSlider = AddSlider(p, {
+        name = "EFHelperConfigXPBarScale",
+        relativeTo = autoPauseCb, x = 10, y = -20,
+        min = 0.5, max = 2.0, step = 0.05,
+        lowText = "0.5x", highText = "2.0x",
+        format = "Construct Scale: %.2fx",
+        key = "scale", default = 1.0,
+        onValueChanged = function() if XPBar then XPBar:ApplyLayout() end end,
+    })
 
     -- 7. Rolling Window Size Slider (1.0h to 6.0h)
-    local windowSlider = CreateFrame("Slider", "EFHelperConfigXPBarWindow", p, "OptionsSliderTemplate")
-    windowSlider:SetPoint("LEFT", scaleSlider, "RIGHT", 30, 0)
-    windowSlider:SetSize(210, 16)
-    windowSlider:SetMinMaxValues(1.0, 6.0)
-    windowSlider:SetValueStep(0.5)
-    _G[windowSlider:GetName() .. "Low"]:SetText("1.0h")
-    _G[windowSlider:GetName() .. "High"]:SetText("6.0h")
-    windowSlider:SetScript("OnValueChanged", function(self, value)
-        local val = math.floor(value * 2 + 0.5) / 2
-        if XPBar then
-            local db = XPBar:GetDB()
-            db.rollingWindowHours = val
-            XPBar:UpdateClockDisplay(true)
-        end
-        _G[self:GetName() .. "Text"]:SetText(string.format("Rolling Window: %.1f hrs", val))
-    end)
+    local windowSlider = AddSlider(p, {
+        name = "EFHelperConfigXPBarWindow",
+        point = "LEFT", relativeTo = scaleSlider, x = 30,
+        min = 1.0, max = 6.0, step = 0.5,
+        lowText = "1.0h", highText = "6.0h",
+        format = "Rolling Window: %.1f hrs",
+        key = "rollingWindowHours", default = 2.0,
+        onValueChanged = function() if XPBar then XPBar:UpdateClockDisplay(true) end end,
+    })
 
     -- 8. Action Buttons (Reset Session & Reset Position)
-    local resetSessionBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    resetSessionBtn:SetSize(140, 24)
-    resetSessionBtn:SetPoint("TOPLEFT", scaleSlider, "BOTTOMLEFT", -10, -22)
-    resetSessionBtn:SetText("Reset Session")
-    resetSessionBtn:SetScript("OnClick", function()
-        if XPBar and XPBar.ResetSession then
-            XPBar:ResetSession()
-        end
-    end)
+    local resetSessionBtn = AddButton(p, {
+        width = 140, height = 24,
+        relativeTo = scaleSlider, x = -10, y = -22,
+        text = "Reset Session",
+        onClick = function()
+            if XPBar and XPBar.ResetSession then XPBar:ResetSession() end
+        end,
+    })
 
-    local resetPosBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    resetPosBtn:SetSize(140, 24)
-    resetPosBtn:SetPoint("LEFT", resetSessionBtn, "RIGHT", 12, 0)
-    resetPosBtn:SetText("Reset Position")
-    resetPosBtn:SetScript("OnClick", function()
-        if XPBar then
-            local db = XPBar:GetDB()
-            db.pos = nil
-            db.scale = 1.0
-            XPBar:ApplyLayout()
-            if scaleSlider then scaleSlider:SetValue(1.0) end
-            print("|cff00ffff[EFHelper XPBar]|r Position and scale reset to default center.")
-        end
-    end)
+    local resetPosBtn = AddButton(p, {
+        width = 140, height = 24,
+        point = "LEFT", relativeTo = resetSessionBtn, x = 12,
+        text = "Reset Position",
+        onClick = function()
+            if XPBar then
+                local db = XPBar:GetDB()
+                db.pos = nil
+                db.scale = 1.0
+                XPBar:ApplyLayout()
+                if scaleSlider then scaleSlider:SetValue(1.0) end
+                print("|cff00ffff[EFHelper XPBar]|r Position and scale reset to default center.")
+            end
+        end,
+    })
 
     -- 9. Information Box
-    local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", resetSessionBtn, "BOTTOMLEFT", 0, -12)
-    infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
-    infoBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    infoBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    infoBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local infoText = infoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    infoText:SetPoint("TOPLEFT", infoBox, "TOPLEFT", 10, -8)
-    infoText:SetPoint("BOTTOMRIGHT", infoBox, "BOTTOMRIGHT", -10, 8)
-    infoText:SetJustifyH("LEFT")
-    infoText:SetJustifyV("TOP")
-    infoText:SetText(
+    AddInfoBox(p,
         "|cffffd100XP Bar Controls & Long-Session Pacing:|r\n" ..
         "• |cff8060ffPurple Section|r: Current character XP. |cffff9900Orange Section|r: Completed quests XP ready for turn-in.\n" ..
         "• |cffffffffShift + Left-Click bar|r: Toggle |cffffaa00Pause / Resume|r on session tracking.\n" ..
         "• |cffffffffRolling Window|r: Prevents metric inertia by averaging over the last N hours instead of whole session.\n" ..
         "• |cffffffffAutopause|r: Neglects 6 of 10 idle minutes if AFK, preserving long-session rate integrity.\n" ..
         "• |cffffffffShift-Right-Click bar|r: Toggle position Lock/Unlock. |cffffffffDrag|r to reposition when unlocked.\n" ..
-        "• Slash commands: |cff00ffff/efh xpbar reset|r (reset session XP/hr), |cff00ffff/efh xpbar lock|r (lock/unlock position)."
+        "• Slash commands: |cff00ffff/efh xpbar reset|r (reset session XP/hr), |cff00ffff/efh xpbar lock|r (lock/unlock position).",
+        resetSessionBtn, -12
     )
 
     p.OnRefresh = function(self)
         if XPBar then
             local db = XPBar:GetDB()
             RefreshCheckboxes(self)
-            scaleSlider:SetValue(db.scale or 1.0)
-            _G[scaleSlider:GetName() .. "Text"]:SetText(string.format("Construct Scale: %.2fx", db.scale or 1.0))
-            local winVal = db.rollingWindowHours or 2.0
-            windowSlider:SetValue(winVal)
-            _G[windowSlider:GetName() .. "Text"]:SetText(string.format("Rolling Window: %.1f hrs", winVal))
             if db.rateMode == "total" then
                 windowSlider:SetAlpha(0.4)
                 windowSlider:EnableMouse(false)
@@ -1284,84 +1252,59 @@ local function CreateTrainSpellsPanel(parent)
     -- Section 2: Toast Duration Slider
     local sec2 = CreateSectionTitle(p, "Toast Notification Pacing", autoTrainCb, -10)
 
-    local durationSlider = CreateFrame("Slider", "EFHelperConfigToastDurationSlider", p, "OptionsSliderTemplate")
-    durationSlider:SetPoint("TOPLEFT", sec2, "BOTTOMLEFT", 8, -16)
-    durationSlider:SetMinMaxValues(2.0, 8.0)
-    durationSlider:SetValueStep(0.5)
-    durationSlider:SetObeyStepOnDrag(true)
-    durationSlider:SetWidth(210)
-    _G[durationSlider:GetName() .. "Low"]:SetText("2.0s")
-    _G[durationSlider:GetName() .. "High"]:SetText("8.0s")
-    durationSlider:SetScript("OnValueChanged", function(slider, value)
-        if TrainSpells then
-            local db = TrainSpells:GetDB()
-            db.toastDuration = value
-            _G[slider:GetName() .. "Text"]:SetText(string.format("Duration: %.1fs", value))
-        end
-    end)
+    local durationSlider = AddSlider(p, {
+        name = "EFHelperConfigToastDurationSlider",
+        relativeTo = sec2, x = 8, y = -16,
+        min = 2.0, max = 8.0, step = 0.5,
+        lowText = "2.0s", highText = "8.0s",
+        format = "Duration: %.1fs",
+        key = "toastDuration", default = 4.0,
+    })
 
     -- Section 3: Interactive Action Buttons
-    local testToastBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    testToastBtn:SetSize(140, 24)
-    testToastBtn:SetPoint("TOPLEFT", durationSlider, "BOTTOMLEFT", -8, -18)
-    testToastBtn:SetText("Test Toast")
-    testToastBtn:SetScript("OnClick", function()
-        local mod = EFHelper.TrainSpells or addonTable.TrainSpells or TrainSpells
-        if mod and mod.TestToast then
-            mod:TestToast()
-        else
-            print("|cffff4444[EFHelper]|r Trainer module is not active.")
-        end
-    end)
+    local testToastBtn = AddButton(p, {
+        width = 140, height = 24,
+        relativeTo = durationSlider, x = -8, y = -18,
+        text = "Test Toast",
+        onClick = function()
+            local mod = EFHelper.TrainSpells or addonTable.TrainSpells or TrainSpells
+            if mod and mod.TestToast then
+                mod:TestToast()
+            else
+                print("|cffff4444[EFHelper]|r Trainer module is not active.")
+            end
+        end,
+    })
 
-    local openSpellbookBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    openSpellbookBtn:SetSize(150, 24)
-    openSpellbookBtn:SetPoint("LEFT", testToastBtn, "RIGHT", 12, 0)
-    openSpellbookBtn:SetText("Toggle Trainer View")
-    openSpellbookBtn:SetScript("OnClick", function()
-        local mod = EFHelper.TrainSpells or addonTable.TrainSpells or TrainSpells
-        if mod and mod.ToggleSpellbookPanel then
-            mod:ToggleSpellbookPanel()
-        else
-            print("|cffff4444[EFHelper]|r Trainer module is not active.")
-        end
-    end)
+    local openSpellbookBtn = AddButton(p, {
+        width = 150, height = 24,
+        point = "LEFT", relativeTo = testToastBtn, x = 12,
+        text = "Toggle Trainer View",
+        onClick = function()
+            local mod = EFHelper.TrainSpells or addonTable.TrainSpells or TrainSpells
+            if mod and mod.ToggleSpellbookPanel then
+                mod:ToggleSpellbookPanel()
+            else
+                print("|cffff4444[EFHelper]|r Trainer module is not active.")
+            end
+        end,
+    })
 
     -- Section 4: Information Box
-    local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", testToastBtn, "BOTTOMLEFT", 0, -12)
-    infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
-    infoBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    infoBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    infoBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local infoText = infoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    infoText:SetPoint("TOPLEFT", infoBox, "TOPLEFT", 10, -8)
-    infoText:SetPoint("BOTTOMRIGHT", infoBox, "BOTTOMRIGHT", -10, 8)
-    infoText:SetJustifyH("LEFT")
-    infoText:SetJustifyV("TOP")
-    infoText:SetText(
+    AddInfoBox(p,
         "|cffffd100Trainer Spells & Auto-Train Features:|r\n" ..
         "• |cffffffffAuto-Train|r: Automatically purchases all selected spells when talking to your class trainer.\n" ..
         "• |cffffffffTrainer Integration|r: Adds a 'Train Selected' button directly to class trainer windows.\n" ..
         "• |cffffffffTrade Safe|r: Strictly ignores tradeskill trainers (never auto-buys profession recipes).\n" ..
         "• |cffffffffSpellbook View|r: View all 1-60 trainable spells, ranks, and gold costs for your class.\n" ..
         "• |cffffffffLevel-Up Toast|r: Compact list of all newly unlocked spells (drag while Test Toast is active to move).\n" ..
-        "• Configuration: Use the checkboxes above to toggle auto-training, spellbook tab, and toast alerts."
+        "• Configuration: Use the checkboxes above to toggle auto-training, spellbook tab, and toast alerts.",
+        testToastBtn, -12
     )
 
     p.OnRefresh = function(self)
         if TrainSpells then
-            local db = TrainSpells:GetDB()
             RefreshCheckboxes(self)
-            local dur = db.toastDuration or 4.0
-            durationSlider:SetValue(dur)
-            _G[durationSlider:GetName() .. "Text"]:SetText(string.format("Duration: %.1fs", dur))
         end
     end
 
@@ -1378,15 +1321,7 @@ local function CreateWaypointBridgePanel(parent)
     local WaypointBridge = addonTable.WaypointBridge or EFHelper.WaypointBridge
 
     -- Title & Description
-    local title = p:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
-    title:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -18)
-    title:SetText("RestedXP -> WaypointUI 3D Bridge")
-
-    local desc = p:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-    desc:SetPoint("RIGHT", p, "RIGHT", -20, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("Dynamically translates your active RestedXP objective into a 3D world beacon in WaypointUI without modifying either addon.")
+    local desc = CreatePanelHeader(p, "RestedXP -> WaypointUI 3D Bridge", "Dynamically translates your active RestedXP objective into a 3D world beacon in WaypointUI without modifying either addon.")
 
     p._getDB = function() return WaypointBridge and WaypointBridge:GetDB() end
 
@@ -1432,73 +1367,42 @@ local function CreateWaypointBridgePanel(parent)
     p.colorCb = colorCb
 
     -- 4. Live Status Box
-    local statusBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    statusBox:SetPoint("TOPLEFT", colorCb, "BOTTOMLEFT", 0, -8)
-    statusBox:SetPoint("RIGHT", p, "RIGHT", -20, 0)
-    statusBox:SetHeight(92)
-    statusBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    statusBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    statusBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local statusText = statusBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    statusText:SetPoint("TOPLEFT", statusBox, "TOPLEFT", 10, -8)
-    statusText:SetPoint("BOTTOMRIGHT", statusBox, "BOTTOMRIGHT", -10, 8)
-    statusText:SetJustifyH("LEFT")
-    statusText:SetJustifyV("TOP")
-    p.statusText = statusText
+    local statusBox = AddInfoBox(p, { relativeTo = colorCb, y = -8, height = 92 })
+    p.statusText = statusBox.text
 
     -- 5. Action Buttons (Force Re-Sync & Clear Bridge Waypoint)
-    local syncBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    syncBtn:SetSize(180, 26)
-    syncBtn:SetPoint("TOPLEFT", statusBox, "BOTTOMLEFT", 0, -10)
-    syncBtn:SetText("Force Re-Sync Waypoint")
-    syncBtn:SetScript("OnClick", function()
-        if WaypointBridge and WaypointBridge.SyncObjective then
-            WaypointBridge:SyncObjective(true)
-            p:OnRefresh()
-        end
-    end)
+    local syncBtn = AddButton(p, {
+        width = 180, height = 26,
+        relativeTo = statusBox, y = -10,
+        text = "Force Re-Sync Waypoint",
+        onClick = function()
+            if WaypointBridge and WaypointBridge.SyncObjective then
+                WaypointBridge:SyncObjective(true)
+                p:OnRefresh()
+            end
+        end,
+    })
 
-    local clearBtn = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-    clearBtn:SetSize(180, 26)
-    clearBtn:SetPoint("LEFT", syncBtn, "RIGHT", 12, 0)
-    clearBtn:SetText("Clear Bridge Waypoint")
-    clearBtn:SetScript("OnClick", function()
-        if WaypointBridge and WaypointBridge.ClearSyncedWaypoint then
-            WaypointBridge:ClearSyncedWaypoint()
-            p:OnRefresh()
-        end
-    end)
+    local clearBtn = AddButton(p, {
+        width = 180, height = 26,
+        point = "LEFT", relativeTo = syncBtn, x = 12,
+        text = "Clear Bridge Waypoint",
+        onClick = function()
+            if WaypointBridge and WaypointBridge.ClearSyncedWaypoint then
+                WaypointBridge:ClearSyncedWaypoint()
+                p:OnRefresh()
+            end
+        end,
+    })
 
     -- 6. Information Box
-    local infoBox = CreateFrame("Frame", nil, p, "BackdropTemplate")
-    infoBox:SetPoint("TOPLEFT", syncBtn, "BOTTOMLEFT", 0, -10)
-    infoBox:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", -20, 14)
-    infoBox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        edgeSize = 1,
-        insets = { left = 1, right = 1, top = 1, bottom = 1 },
-    })
-    infoBox:SetBackdropColor(0.04, 0.05, 0.07, 0.5)
-    infoBox:SetBackdropBorderColor(0.2, 0.2, 0.25, 0.6)
-
-    local infoText = infoBox:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    infoText:SetPoint("TOPLEFT", infoBox, "TOPLEFT", 10, -8)
-    infoText:SetPoint("BOTTOMRIGHT", infoBox, "BOTTOMRIGHT", -10, 8)
-    infoText:SetJustifyH("LEFT")
-    infoText:SetJustifyV("TOP")
-    infoText:SetText(
+    AddInfoBox(p,
         "|cffffd100Waypoint Bridge Behavior & Design:|r\n" ..
         "• |cffffffffStep Context Summary|r: Extracts associated NPCs (|cff00ffff.target|r), Mobs (|cff00ffff.mob|r), and live quest progress (|cff00ffff.complete|r / |cff00ffff.collect|r) and updates counts in real time.\n" ..
         "• |cffffffffObjective Visuals|r: Customizes the 3D beacon's icon & beam color by action (Kill, Loot, Turn-In, Accept, Train, Flight).\n" ..
         "• |cffffffffSpawn Loop Protection|r: Locks |cff00ffff#loop|r / |cff00ffff.loop|r steps to their 1st coordinate while still updating live kill/loot counters.\n" ..
-        "• |cffffffffSuperTrack Guard|r: Prevents RXP's quest tracker from overriding WaypointUI's custom navigation text."
+        "• |cffffffffSuperTrack Guard|r: Prevents RXP's quest tracker from overriding WaypointUI's custom navigation text.",
+        syncBtn, -10
     )
 
     p.OnRefresh = function(self)
