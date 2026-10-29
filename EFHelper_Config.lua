@@ -56,6 +56,11 @@ local MODULE_TABS = {
         subtext = "RXP to WaypointUI",
         icon = "Interface\\Icons\\INV_Misc_Map_01",
     },
+    {
+        name = "Party RXP Sync",
+        subtext = "Group steps & quests",
+        icon = "Interface\\Icons\\Achievement_GuildPerk_Everyones A Hero",
+    },
 }
 
 local function SelectTab(tabIndex)
@@ -77,10 +82,19 @@ local function SelectTab(tabIndex)
 end
 Config.SelectTab = SelectTab
 
+function Config:RefreshActivePanel()
+    if not configFrame or not configFrame:IsShown() then return end
+    for _, panel in ipairs(panels) do
+        if panel:IsShown() and panel.OnRefresh then
+            panel:OnRefresh()
+        end
+    end
+end
+
 -- Sidebar Button Component
 local function CreateSidebarButton(parent, index, data)
     local btn = CreateFrame("Button", "EFHelperSidebarTab" .. index, parent, "BackdropTemplate")
-    btn:SetSize(164, 46)
+    btn:SetSize(164, 44)
     btn:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8X8",
         edgeFile = "Interface\\Buttons\\WHITE8X8",
@@ -602,6 +616,7 @@ local function CreateTaggingPanel(parent)
     p.mobInput = mobInput
     p.spellDropdown = spellDropdown
     p.feedback = feedback
+    p.hint = hint
 
     p.OnRefresh = function(self)
         RefreshCheckboxes(self)
@@ -1321,7 +1336,7 @@ local function CreateWaypointBridgePanel(parent)
     local WaypointBridge = addonTable.WaypointBridge or EFHelper.WaypointBridge
 
     -- Title & Description
-    local desc = CreatePanelHeader(p, "RestedXP -> WaypointUI 3D Bridge", "Dynamically translates your active RestedXP objective into a 3D world beacon in WaypointUI without modifying either addon.")
+    local desc = CreatePanelHeader(p, "RestedXP -> WaypointUI 3D Bridge", "Translates your active RestedXP objective into a 3D world beacon in WaypointUI with live step summaries and loop protection.")
 
     p._getDB = function() return WaypointBridge and WaypointBridge:GetDB() end
 
@@ -1367,12 +1382,13 @@ local function CreateWaypointBridgePanel(parent)
     p.colorCb = colorCb
 
     -- 4. Live Status Box
-    local statusBox = AddInfoBox(p, { relativeTo = colorCb, y = -8, height = 92 })
-    p.statusText = statusBox.text
+    local statusBox = AddInfoBox(p, { relativeTo = colorCb, y = -8, height = 84 })
+    local statusText = statusBox.text
+    p.statusText = statusText
 
-    -- 5. Action Buttons (Force Re-Sync & Clear Bridge Waypoint)
+    -- 5. Action Buttons
     local syncBtn = AddButton(p, {
-        width = 180, height = 26,
+        width = 160, height = 26,
         relativeTo = statusBox, y = -10,
         text = "Force Re-Sync Waypoint",
         onClick = function()
@@ -1384,8 +1400,8 @@ local function CreateWaypointBridgePanel(parent)
     })
 
     local clearBtn = AddButton(p, {
-        width = 180, height = 26,
-        point = "LEFT", relativeTo = syncBtn, x = 12,
+        width = 160, height = 26,
+        point = "LEFT", relativeTo = syncBtn, x = 10,
         text = "Clear Bridge Waypoint",
         onClick = function()
             if WaypointBridge and WaypointBridge.ClearSyncedWaypoint then
@@ -1458,6 +1474,201 @@ local function CreateWaypointBridgePanel(parent)
 end
 
 -- ----------------------------------------------------------------------------
+-- Panel 8: Party RXP Sync (Group Quest-Tracker HUD & Town-Cycle Alignment)
+-- ----------------------------------------------------------------------------
+local function CreatePartyRXPPanel(parent)
+    local p = CreateFrame("Frame", nil, parent)
+    p:SetAllPoints()
+
+    local PartyRXP = addonTable.PartyRXP or EFHelper.PartyRXP
+    local WaypointBridge = addonTable.WaypointBridge or EFHelper.WaypointBridge
+
+    local desc = CreatePanelHeader(p, "Party RXP Tracker & Town-Cycle Sync", "Displays a unified group Quest-Tracker HUD with smart Group Remaining totals, 1-click EFHRXP tagging, and post-town quest alignment.")
+
+    p._getDB = function() return PartyRXP and PartyRXP:GetDB() end
+
+    -- 1. Enable Party RXP Sync
+    local enableCb = AddCheckbox(p, {
+        name = "EFHelperConfigPartyRXPEnable",
+        label = "Enable Real-Time Party RXP Step & Objective Progress Sync",
+        relativeTo = desc,
+        key = "enabled",
+        onClick = function()
+            if PartyRXP then PartyRXP:UpdateHUD() end
+            if WaypointBridge then WaypointBridge:SyncObjective(true) end
+            p:OnRefresh()
+        end,
+    })
+    p.enableCb = enableCb
+
+    -- 2. Show Movable Party RXP HUD
+    local showHudCb = AddCheckbox(p, {
+        name = "EFHelperConfigPartyRXPHUD",
+        label = "Show Movable Party RXP HUD when in a Party (Shift+Right-Click to Lock)",
+        key = "showHUD",
+        onClick = function()
+            if PartyRXP then PartyRXP:UpdateHUD() end
+            p:OnRefresh()
+        end,
+    })
+    p.showHudCb = showHudCb
+
+    -- 3. Include Own Progress in HUD
+    local showSelfCb = AddCheckbox(p, {
+        name = "EFHelperConfigPartyRXPSelf",
+        label = "Include Your Own Step & Objectives at the Top of the Party HUD",
+        key = "showSelf",
+        onClick = function()
+            if PartyRXP then PartyRXP:UpdateHUD() end
+        end,
+    })
+    p.showSelfCb = showSelfCb
+
+    -- 4. Show Aggregated "Group Remaining" Footer
+    local groupRemCb = AddCheckbox(p, {
+        name = "EFHelperConfigPartyRXPGroupRem",
+        label = "Show Aggregated 'Group Remaining' Footer (Sums Loot Drops / Maxes Shared Kills)",
+        key = "showGroupRemaining",
+        onClick = function()
+            if PartyRXP then PartyRXP:UpdateHUD() end
+        end,
+    })
+    p.groupRemCb = groupRemCb
+
+    -- 5. Click Objective on HUD to Set EFHRXP
+    local clickTagCb = AddCheckbox(p, {
+        name = "EFHelperConfigPartyRXPClickTag",
+        label = "Click Incomplete Objective on HUD Out of Combat to Set 'EFHRXP' Tag Macro",
+        key = "clickToTag",
+        onClick = function()
+            if PartyRXP then PartyRXP:UpdateHUD() end
+        end,
+    })
+    p.clickTagCb = clickTagCb
+
+    -- 6. Town-Cycle Quest Alignment & Auto-Share
+    local townSyncCb = AddCheckbox(p, {
+        name = "EFHelperConfigPartyRXPTownSync",
+        label = "Enable Town-Cycle Quest Alignment & Auto-Share When Leaving Town for Field Steps",
+        key = "townCycleSync",
+        onClick = function()
+            if PartyRXP then PartyRXP:EvaluateTownCycleState(); PartyRXP:UpdateHUD() end
+            p:OnRefresh()
+        end,
+    })
+    p.townSyncCb = townSyncCb
+
+    -- 7. HUD Size / Scale Slider
+    local scaleSlider = AddSlider(p, {
+        name = "EFHelperConfigPartyRXPScale",
+        relativeTo = townSyncCb,
+        x = 6, y = -18,
+        width = 240,
+        min = 60, max = 180, step = 5, default = 100,
+        lowText = "60%", highText = "180%",
+        format = "HUD Size / Scale: %d%%",
+        key = "scale",
+        onValueChanged = function()
+            if PartyRXP then PartyRXP:UpdateHUD() end
+        end,
+    })
+    p.scaleSlider = scaleSlider
+
+    -- 8. Live Status Box
+    local statusBox = AddInfoBox(p, { relativeTo = scaleSlider, x = -6, y = -14, height = 68 })
+    local statusText = statusBox.text
+    p.statusText = statusText
+
+    -- 8. Action Buttons
+    local syncBtn = AddButton(p, {
+        width = 125, height = 24,
+        relativeTo = statusBox, y = -8,
+        text = "Force Party Sync",
+        onClick = function()
+            if PartyRXP and PartyRXP.RequestPartySync then PartyRXP:RequestPartySync() end
+            if WaypointBridge and WaypointBridge.SyncObjective then WaypointBridge:SyncObjective(true) end
+            p:OnRefresh()
+        end,
+    })
+
+    local previewBtn = AddButton(p, {
+        width = 130, height = 24,
+        point = "LEFT", relativeTo = syncBtn, x = 8,
+        text = "Preview Party HUD",
+        onClick = function(self)
+            if PartyRXP and PartyRXP.ToggleTestMode then
+                local active = PartyRXP:ToggleTestMode()
+                self:SetText(active and "Stop Preview" or "Preview Party HUD")
+                p:OnRefresh()
+            end
+        end,
+    })
+
+    local resetPosBtn = AddButton(p, {
+        width = 115, height = 24,
+        point = "LEFT", relativeTo = previewBtn, x = 8,
+        text = "Reset HUD Pos",
+        onClick = function()
+            if PartyRXP and PartyRXP.ResetPosition then
+                PartyRXP:ResetPosition()
+                print("|cff0cd29f[EFHelper PartyRXP]|r Party RXP HUD position reset.")
+            end
+        end,
+    })
+
+    local clearMissedBtn = AddButton(p, {
+        width = 130, height = 24,
+        point = "LEFT", relativeTo = resetPosBtn, x = 8,
+        text = "Clear Missed Alerts",
+        onClick = function()
+            if PartyRXP and PartyRXP.ClearMissedQuests then
+                PartyRXP:ClearMissedQuests()
+                p:OnRefresh()
+            end
+        end,
+    })
+
+    -- 9. Information Box
+    AddInfoBox(p,
+        "|cffffd100Party RXP Tracker & Town-Cycle Alignment:|r\n" ..
+        "• |cffffffffUnified Group Tracker|r: Lists your progress + each party member's step delta, keeping completed lines in dim green (|cff44aa66✓|r) and highlighting objectives a party member still needs in gold.\n" ..
+        "• |cffffffff1-Click EFHRXP Tagging|r: Click any incomplete mob/objective row on the HUD out of combat to set |cff00ffffEFHRXP|r to that mob—even after your own step has advanced.\n" ..
+        "• |cffffffffTown-Cycle Sync|r: Detects multi-step town hubs (accepts/turn-ins/vendor/trainer), stays silent while in town, and auto-shares or warns on missed quests when the party heads out to a field step.",
+        syncBtn, -8
+    )
+
+    p.OnRefresh = function(self)
+        if not PartyRXP then return end
+        RefreshCheckboxes(self)
+
+        if previewBtn then
+            previewBtn:SetText(PartyRXP.isTestMode and "Stop Preview" or "Preview Party HUD")
+        end
+
+        local st = PartyRXP.localState or {}
+        local myStepStr = st.step and ("Step " .. tostring(st.step)) or "No Active Step"
+        local townStr = (PartyRXP.inTownCycle or st.isTownCycle)
+            and "|cff00ff99Active (Buffering Town Quests)|r"
+            or "|cff888888Field / Inactive|r"
+
+        local partyLines = PartyRXP:GetFormattedPartyLines()
+        local partySummary = (#partyLines > 0)
+            and table.concat(partyLines, "  |  ")
+            or "|cff888888Solo / Waiting for party sync|r"
+
+        local remLine = PartyRXP:BuildGroupRemainingSummary() or "|cff888888No active kill/loot counters on current step|r"
+
+        statusText:SetText(string.format(
+            "|cffffd100Local Step:|r |cffffffff%s|r (%s)   |   |cffffd100Town Cycle:|r %s\n" ..
+            "|cffffd100Party Roster:|r %s\n%s",
+            myStepStr, st.category or "TRAVEL", townStr, partySummary, remLine
+        ))
+    end
+
+    return p
+end
+
+-- ----------------------------------------------------------------------------
 -- Unified Window Builder
 -- ----------------------------------------------------------------------------
 function Config:GetOrCreateWindow()
@@ -1504,7 +1715,7 @@ function Config:GetOrCreateWindow()
     -- Sidebar Category Buttons
     for i, data in ipairs(MODULE_TABS) do
         local tabBtn = CreateSidebarButton(sidebar, i, data)
-        tabBtn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 4, -28 - (i - 1) * 50)
+        tabBtn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 4, -28 - (i - 1) * 48)
         table.insert(tabButtons, tabBtn)
     end
 
@@ -1534,6 +1745,7 @@ function Config:GetOrCreateWindow()
     panels[5] = CreateXPBarPanel(contentArea)
     panels[6] = CreateTrainSpellsPanel(contentArea)
     panels[7] = CreateWaypointBridgePanel(contentArea)
+    panels[8] = CreatePartyRXPPanel(contentArea)
 
     -- Default to Tab 1
     SelectTab(1)

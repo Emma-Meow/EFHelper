@@ -26,5 +26,6 @@ EFHelper_XP.lua
 EFHelper_XPBar.lua
 EFHelper_TrainerData.lua
 EFHelper_TrainSpells.lua
+EFHelper_PartyRXP.lua
 EFHelper_WaypointBridge.lua
 EFHelper_Config.lua

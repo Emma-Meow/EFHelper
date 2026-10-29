@@ -91,6 +91,19 @@ local dbDefaults = {
             showStepSummary = true,
             colorByType = true,
         },
+
+        PartyRXP = {
+            enabled = true,
+            showHUD = true,
+            showSelf = true,
+            showGroupRemaining = true,
+            clickToTag = true,
+            townCycleSync = true,
+            autoShareTownQuests = true,
+            scale = 100,
+            locked = false,
+            pos = nil,
+        },
     },
     char = {
         lastSpell = nil,

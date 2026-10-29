@@ -108,7 +108,11 @@ local function GetRXP()
     if LibStub then
         local ace = LibStub("AceAddon-3.0", true)
         if ace then
-            return ace:GetAddon("RXPGuides", true)
+            local addon = ace:GetAddon("RXPGuides", true)
+            if addon and type(addon.SetStep) == "function" then
+                return addon
+            end
+            if addon then return addon end
         end
     end
     return nil
@@ -544,7 +548,7 @@ local function ResolveUnitListNames(rxp, list, out, seen)
                 if ok and resolved and resolved ~= "" then name = resolved end
             end
         elseif type(rawUnit) == "string" then
-            local parsedName = rawUnit:match("^%+?(.+)::%d+$") or rawUnit:match("^%+?(.+)$")
+            local parsedName = rawUnit:match("^[%+%*]?%s*(.+)::%d+$") or rawUnit:match("^[%+%*]?%s*(.+)$")
             if parsedName and not tonumber(parsedName) then
                 name = parsedName
             end
@@ -560,18 +564,18 @@ end
 --- Extracts a structured summary and objective category from the active RXP step/element.
 -- Returns: summaryText, categoryKey, iconTexture, r, g, b
 local function ExtractStepContext(rxp, element, useRichSummary)
-    if not element then
+    local step = element and element.step or nil
+    if not element and not step then
         local prof = CATEGORY_PROFILES.TRAVEL
         return "Objective", "TRAVEL", prof.icon, prof.r, prof.g, prof.b
     end
 
     -- Ghost corpse run special case
-    if element.wpHash == 0 and element.generated == 1 then
+    if element and element.wpHash == 0 and element.generated == 1 then
         local prof = CATEGORY_PROFILES.TRAVEL
         return "Run to your Corpse", "TRAVEL", prof.icon, 0.9, 0.95, 1.0
     end
 
-    local step = element.step
     local clusterItems = GetRelevantStepElements(step, element)
 
     local targets, seenTargets = {}, {}
@@ -610,8 +614,10 @@ local function ExtractStepContext(rxp, element, useRichSummary)
 
             if tag == "target" then
                 ResolveUnitListNames(rxp, el.targets or el.unitlist, targets, seenTargets)
-            elseif tag == "mob" or tag == "unitscan" then
-                ResolveUnitListNames(rxp, el.mobs or el.unitscan or el.unitlist, mobs, seenMobs)
+            elseif tag == "mob" then
+                ResolveUnitListNames(rxp, el.mobs or el.unitlist, mobs, seenMobs)
+            elseif tag == "unitscan" then
+                ResolveUnitListNames(rxp, el.unitscan or el.unitlist or el.mobs, mobs, seenMobs)
             elseif not el.completed then
                 if tag == "complete" then
                     if combatIcon and el.icon == combatIcon then
@@ -790,7 +796,7 @@ local function ExtractStepContext(rxp, element, useRichSummary)
 
     -- 5. Ultimate fallback to element title / step index
     if #finalLines == 0 then
-        local rawFallback = SanitizeRXPText(rxp, element.title or (step and (step.arrowtext or step.title or step.text)))
+        local rawFallback = SanitizeRXPText(rxp, (element and element.title) or (step and (step.arrowtext or step.title or step.text)))
         if rawFallback then
             table.insert(finalLines, rawFallback)
         elseif step and step.index then
@@ -872,22 +878,24 @@ end
 
 function WaypointBridge:SyncObjective(force)
     local db = self:GetDB()
-    if db.enabled == false then
-        self:ClearSyncedWaypoint()
-        return
-    end
-
     local rxp = GetRXP()
-    local wui = GetWUI()
-    if not rxp or not wui or not wui.NewUserNavigation then
+    if not rxp then
+        self:ClearSyncedWaypoint()
         return
     end
 
     local af = rxp.arrowFrame or _G.RXPG_ARROW
     local element = af and af.element or nil
+    local useRichSummary = (db.showStepSummary ~= false)
+    local useColor = (db.colorByType ~= false)
 
-    if not IsElementCurrentlyActive(rxp, af, element) then
+    if not IsElementCurrentlyActive(rxp, af, element) or db.enabled == false then
         self:ClearSyncedWaypoint()
+        return
+    end
+
+    local wui = GetWUI()
+    if not wui or not wui.NewUserNavigation then
         return
     end
 
@@ -895,8 +903,6 @@ function WaypointBridge:SyncObjective(force)
 
     local step = element.step
     local loopKey = GetLoopChainKey(element)
-    local useRichSummary = (db.showStepSummary ~= false)
-    local useColor = (db.colorByType ~= false)
 
     -- If this element is part of a loop chain (#loop or .loop) and we have already
     -- placed the initial waypoint for this (step, loopKey), keep the 1st coordinate
@@ -1029,26 +1035,79 @@ function WaypointBridge:HookRXP()
     local rxp = GetRXP()
     if not rxp then return end
 
-    if not self.isRXPHooked then
-        self.isRXPHooked = true
+    if type(rxp.SetStep) == "function" and not self.isSetStepHooked then
+        self.isSetStepHooked = true
+        hooksecurefunc(rxp, "SetStep", function()
+            WaypointBridge:SyncObjective(false)
+        end)
+    end
 
-        if type(rxp.UpdateMap) == "function" then
-            hooksecurefunc(rxp, "UpdateMap", function()
+    if type(rxp.LoadGuide) == "function" and not self.isLoadGuideHooked then
+        self.isLoadGuideHooked = true
+        hooksecurefunc(rxp, "LoadGuide", function()
+            if C_Timer and C_Timer.After then
+                C_Timer.After(0.05, function()
+                    WaypointBridge:HookRXP()
+                    WaypointBridge:SyncObjective(false)
+                end)
+            else
+                WaypointBridge:HookRXP()
                 WaypointBridge:SyncObjective(false)
-            end)
-        end
+            end
+        end)
+    end
 
-        if type(rxp.UpdateGotoSteps) == "function" then
-            hooksecurefunc(rxp, "UpdateGotoSteps", function()
+    if type(rxp.ReloadGuide) == "function" and not self.isReloadGuideHooked then
+        self.isReloadGuideHooked = true
+        hooksecurefunc(rxp, "ReloadGuide", function()
+            if C_Timer and C_Timer.After then
+                C_Timer.After(0.05, function()
+                    WaypointBridge:HookRXP()
+                    WaypointBridge:SyncObjective(false)
+                end)
+            else
+                WaypointBridge:HookRXP()
                 WaypointBridge:SyncObjective(false)
-            end)
-        end
+            end
+        end)
+    end
 
-        if rxp.RXPFrame and rxp.RXPFrame.CurrentStepFrame and type(rxp.RXPFrame.CurrentStepFrame.UpdateText) == "function" then
-            hooksecurefunc(rxp.RXPFrame.CurrentStepFrame, "UpdateText", function()
-                WaypointBridge:SyncObjective(false)
-            end)
-        end
+    if type(rxp.UpdateMap) == "function" and not self.isUpdateMapHooked then
+        self.isUpdateMapHooked = true
+        hooksecurefunc(rxp, "UpdateMap", function()
+            WaypointBridge:SyncObjective(false)
+        end)
+    end
+
+    if type(rxp.UpdateGotoSteps) == "function" and not self.isUpdateGotoHooked then
+        self.isUpdateGotoHooked = true
+        hooksecurefunc(rxp, "UpdateGotoSteps", function()
+            WaypointBridge:SyncObjective(false)
+        end)
+    end
+
+    if rxp.RXPFrame and rxp.RXPFrame.CurrentStepFrame and type(rxp.RXPFrame.CurrentStepFrame.UpdateText) == "function" and not self.isCurrentStepFrameHooked then
+        self.isCurrentStepFrameHooked = true
+        hooksecurefunc(rxp.RXPFrame.CurrentStepFrame, "UpdateText", function()
+            WaypointBridge:SyncObjective(false)
+        end)
+    end
+
+    if type(rxp.RegisterMessage) == "function" and not self.isRXPMessageHooked then
+        self.isRXPMessageHooked = true
+        pcall(rxp.RegisterMessage, rxp, "RXP_GUIDE_LOADED", function()
+            WaypointBridge:HookRXP()
+            WaypointBridge:SyncObjective(false)
+        end)
+        pcall(rxp.RegisterMessage, rxp, "RXP_STEP_ACTIVATED", function()
+            WaypointBridge:SyncObjective(false)
+        end)
+        pcall(rxp.RegisterMessage, rxp, "RXP_STEP_COMPLETE", function()
+            WaypointBridge:SyncObjective(false)
+        end)
+        pcall(rxp.RegisterMessage, rxp, "RXP_OBJECTIVE_COMPLETE", function()
+            WaypointBridge:SyncObjective(false)
+        end)
     end
 
     local af = rxp.arrowFrame or _G.RXPG_ARROW
@@ -1066,7 +1125,6 @@ function WaypointBridge:HookRXP()
 end
 
 function WaypointBridge:OnInitialize()
-    self.isRXPHooked = false
     self.isArrowHooked = false
     self.isSuperTrackHooked = false
     self.isWUIHooked = false
@@ -1093,6 +1151,15 @@ end
 
 function WaypointBridge:OnPlayerEnteringWorld()
     self:HookRXP()
+    if C_Timer and C_Timer.After then
+        local retryDelays = { 0.5, 1.2, 2.5 }
+        for _, delay in ipairs(retryDelays) do
+            C_Timer.After(delay, function()
+                WaypointBridge:HookRXP()
+                WaypointBridge:SyncObjective(false)
+            end)
+        end
+    end
 end
 
 function WaypointBridge:OnSuperTrackingChanged()
@@ -1103,7 +1170,5 @@ function WaypointBridge:OnSuperTrackingChanged()
 end
 
 function WaypointBridge:OnQuestLogUpdate()
-    if self:GetDB().enabled ~= false and lastMapID ~= nil then
-        self:SyncObjective(false)
-    end
+    self:SyncObjective(false)
 end

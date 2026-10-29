@@ -270,4 +270,3 @@ function Tagging:OnInitialize()
         end
     end)
 end
-
